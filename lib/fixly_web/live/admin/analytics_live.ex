@@ -655,8 +655,8 @@ defmodule FixlyWeb.Admin.AnalyticsLive do
     if org_id do
       selected_ids = MapSet.to_list(socket.assigns.selected_location_ids)
 
-      from_dt = parse_date(socket.assigns.filter_from)
-      to_dt = parse_date(socket.assigns.filter_to)
+      from_dt = parse_date_start(socket.assigns.filter_from)
+      to_dt = parse_date_end(socket.assigns.filter_to)
 
       query =
         Engine.base_query(org_id)
@@ -700,12 +700,20 @@ defmodule FixlyWeb.Admin.AnalyticsLive do
   defp maybe_for_locations(query, []), do: query
   defp maybe_for_locations(query, ids), do: Engine.for_locations(query, ids)
 
-  defp parse_date(""), do: nil
-  defp parse_date(nil), do: nil
-
-  defp parse_date(date_str) do
+  defp parse_date_start(""), do: nil
+  defp parse_date_start(nil), do: nil
+  defp parse_date_start(date_str) do
     case Date.from_iso8601(date_str) do
       {:ok, date} -> DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+      _ -> nil
+    end
+  end
+
+  defp parse_date_end(""), do: nil
+  defp parse_date_end(nil), do: nil
+  defp parse_date_end(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} -> DateTime.new!(date, ~T[23:59:59], "Etc/UTC")
       _ -> nil
     end
   end
