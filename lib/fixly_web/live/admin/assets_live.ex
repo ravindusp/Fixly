@@ -161,7 +161,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
                           <.icon :if={MapSet.member?(@filter_location_ids, loc.id)} name="hero-check" class="size-2.5 text-primary-content" />
                         </div>
                         <span class={["text-sm truncate", loc.depth == 0 && "font-semibold"]}>{loc.name}</span>
-                        <span :if={loc[:label]} class="badge badge-xs badge-ghost ml-auto shrink-0">{loc.label}</span>
+                        <span :if={loc.label} class="badge badge-xs badge-ghost ml-auto shrink-0">{loc.label}</span>
                       </button>
                     </div>
                     <div class="p-2 border-t border-base-200 flex justify-between">
