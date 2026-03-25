@@ -112,6 +112,20 @@ defmodule Fixly.Locations do
     Repo.delete(location)
   end
 
+  @doc "Count total locations for an org."
+  def count_locations(org_id) do
+    Location
+    |> where([l], l.organization_id == ^org_id)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc "Count locations with QR codes for an org."
+  def count_qr_codes(org_id) do
+    Location
+    |> where([l], l.organization_id == ^org_id and not is_nil(l.qr_code_id))
+    |> Repo.aggregate(:count)
+  end
+
   @doc "Generate a unique QR code ID for a location."
   def generate_qr_code(%Location{} = location) do
     qr_code_id = Nanoid.generate(10, "0123456789abcdefghijklmnopqrstuvwxyz")
