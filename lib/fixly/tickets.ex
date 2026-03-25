@@ -425,18 +425,42 @@ defmodule Fixly.Tickets do
 
   defp maybe_filter_status(query, nil), do: query
   defp maybe_filter_status(query, "all"), do: query
+  defp maybe_filter_status(query, %MapSet{} = s) do
+    if MapSet.size(s) == 0, do: query, else: where(query, [t], t.status in ^MapSet.to_list(s))
+  end
+  defp maybe_filter_status(query, vals) when is_list(vals) do
+    if vals == [], do: query, else: where(query, [t], t.status in ^vals)
+  end
   defp maybe_filter_status(query, status), do: where(query, [t], t.status == ^status)
 
   defp maybe_filter_priority(query, nil), do: query
   defp maybe_filter_priority(query, "all"), do: query
+  defp maybe_filter_priority(query, %MapSet{} = p) do
+    if MapSet.size(p) == 0, do: query, else: where(query, [t], t.priority in ^MapSet.to_list(p))
+  end
+  defp maybe_filter_priority(query, vals) when is_list(vals) do
+    if vals == [], do: query, else: where(query, [t], t.priority in ^vals)
+  end
   defp maybe_filter_priority(query, priority), do: where(query, [t], t.priority == ^priority)
 
   defp maybe_filter_location(query, nil), do: query
   defp maybe_filter_location(query, "all"), do: query
+  defp maybe_filter_location(query, %MapSet{} = ids) do
+    if MapSet.size(ids) == 0, do: query, else: where(query, [t], t.location_id in ^MapSet.to_list(ids))
+  end
+  defp maybe_filter_location(query, ids) when is_list(ids) do
+    if ids == [], do: query, else: where(query, [t], t.location_id in ^ids)
+  end
   defp maybe_filter_location(query, location_id), do: where(query, [t], t.location_id == ^location_id)
 
   defp maybe_filter_category(query, nil), do: query
   defp maybe_filter_category(query, "all"), do: query
+  defp maybe_filter_category(query, %MapSet{} = c) do
+    if MapSet.size(c) == 0, do: query, else: where(query, [t], t.category in ^MapSet.to_list(c))
+  end
+  defp maybe_filter_category(query, vals) when is_list(vals) do
+    if vals == [], do: query, else: where(query, [t], t.category in ^vals)
+  end
   defp maybe_filter_category(query, category), do: where(query, [t], t.category == ^category)
 
   defp maybe_filter_date_from(query, nil), do: query

@@ -42,18 +42,27 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:page_title, "Tickets")
       |> assign(:view_mode, "list")
       |> assign(:search_query, "")
-      # Filters
-      |> assign(:filter_status, "all")
-      |> assign(:filter_priority, "all")
-      |> assign(:filter_category, "all")
+      # Filters (multi-select comboboxes)
+      |> assign(:filter_statuses, MapSet.new())
+      |> assign(:filter_priorities, MapSet.new())
+      |> assign(:filter_categories, MapSet.new())
+      |> assign(:filter_location_ids, MapSet.new())
       |> assign(:filter_date_from, nil)
       |> assign(:filter_date_to, nil)
       |> assign(:show_date_picker, false)
       |> assign(:calendar_month, Date.utc_today())
       |> assign(:filter_assignee_ids, MapSet.new())
-      |> assign(:filter_location_id, "all")
       |> assign(:show_filters, false)
       |> assign(:assignee_search, "")
+      # Combobox UI state
+      |> assign(:show_status_filter, false)
+      |> assign(:status_filter_search, "")
+      |> assign(:show_priority_filter, false)
+      |> assign(:priority_filter_search, "")
+      |> assign(:show_category_filter, false)
+      |> assign(:category_filter_search, "")
+      |> assign(:show_location_filter, false)
+      |> assign(:location_filter_search, "")
       # Reference data
       |> assign(:all_assignees, all_assignees)
       |> assign(:all_categories, all_categories)
@@ -220,11 +229,11 @@ defmodule FixlyWeb.Admin.TicketListLive do
           <!-- Active filter chips -->
           <div :if={active_filter_count(assigns) > 0} class="flex flex-wrap items-center gap-1.5 px-5 py-2 border-b border-base-200 bg-base-200/30">
             <span class="text-xs text-base-content/50 mr-1">Active:</span>
-            <.filter_chip :if={@filter_status != "all"} label={"Status: #{status_label(@filter_status)}"} event="clear_filter" value="status" />
-            <.filter_chip :if={@filter_priority != "all"} label={"Priority: #{String.capitalize(@filter_priority)}"} event="clear_filter" value="priority" />
-            <.filter_chip :if={@filter_category != "all"} label={"Category: #{String.capitalize(@filter_category)}"} event="clear_filter" value="category" />
+            <.filter_chip :if={MapSet.size(@filter_statuses) > 0} label={"Status (#{MapSet.size(@filter_statuses)})"} event="clear_status_filter" value="" />
+            <.filter_chip :if={MapSet.size(@filter_priorities) > 0} label={"Priority (#{MapSet.size(@filter_priorities)})"} event="clear_priority_filter" value="" />
+            <.filter_chip :if={MapSet.size(@filter_categories) > 0} label={"Category (#{MapSet.size(@filter_categories)})"} event="clear_category_filter" value="" />
             <.filter_chip :if={@filter_date_from || @filter_date_to} label={date_range_label(@filter_date_from, @filter_date_to)} event="clear_filter" value="date_range" />
-            <.filter_chip :if={@filter_location_id != "all"} label={"Location"} event="clear_filter" value="location" />
+            <.filter_chip :if={MapSet.size(@filter_location_ids) > 0} label={"Location (#{MapSet.size(@filter_location_ids)})"} event="clear_location_filter" value="" />
             <.filter_chip
               :for={aid <- MapSet.to_list(@filter_assignee_ids)}
               label={assignee_name(aid, @all_assignees)}
@@ -235,59 +244,174 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
           <!-- Filter panel (collapsible) -->
           <div :if={@show_filters} class="px-5 py-4 border-b border-base-300 bg-base-200/20">
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <!-- Status -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Status</label>
-                <form phx-change="set_filter_status">
-                  <select name="status" class="select select-sm select-bordered w-full" value={@filter_status}>
-                    <option :for={{val, label} <- [{"all", "All Statuses"}, {"created", "Open"}, {"triaged", "Triaged"}, {"assigned", "Assigned"}, {"on_hold", "On Hold"}, {"in_progress", "In Progress"}, {"completed", "Completed"}, {"closed", "Closed"}]} value={val} selected={@filter_status == val}>
-                      {label}
-                    </option>
-                  </select>
-                </form>
+            <!-- Row 1: Status, Priority, Category, Location comboboxes -->
+            <div class="flex items-center gap-2 mb-3">
+              <!-- Status combobox -->
+              <div class="relative" phx-click-away="close_status_filter">
+                <button phx-click="toggle_status_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                  <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span :if={MapSet.size(@filter_statuses) == 0} class="text-base-content/60">All Statuses</span>
+                    <span :if={MapSet.size(@filter_statuses) > 0} class="flex items-center gap-1">
+                      <span class="badge badge-xs badge-primary">{MapSet.size(@filter_statuses)}</span>
+                      <span class="text-xs truncate">selected</span>
+                    </span>
+                  </div>
+                  <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                </button>
+                <div :if={@show_status_filter} class="absolute z-30 mt-1 w-64 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                  <div class="p-2 border-b border-base-200">
+                    <form phx-change="search_status_filter">
+                      <input type="text" name="query" value={@status_filter_search} placeholder="Search statuses..." class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                    </form>
+                  </div>
+                  <div class="max-h-56 overflow-y-auto p-1">
+                    <button
+                      :for={{val, label} <- filtered_ticket_statuses(@status_filter_search)}
+                      phx-click="toggle_status_item"
+                      phx-value-id={val}
+                      class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                    >
+                      <div class={["w-4 h-4 rounded border flex items-center justify-center shrink-0", MapSet.member?(@filter_statuses, val) && "bg-primary border-primary", !MapSet.member?(@filter_statuses, val) && "border-base-300"]}>
+                        <.icon :if={MapSet.member?(@filter_statuses, val)} name="hero-check" class="size-2.5 text-primary-content" />
+                      </div>
+                      <span class={["w-2.5 h-2.5 rounded-full shrink-0", status_dot_color(val)]}></span>
+                      <span class="text-sm">{label}</span>
+                    </button>
+                  </div>
+                  <div class="p-2 border-t border-base-200 flex justify-between">
+                    <button phx-click="clear_status_filter" class="btn btn-xs btn-ghost">Clear</button>
+                    <button phx-click="toggle_status_filter" class="btn btn-xs btn-primary">Done</button>
+                  </div>
+                </div>
               </div>
 
-              <!-- Priority -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Priority</label>
-                <form phx-change="set_filter_priority">
-                  <select name="priority" class="select select-sm select-bordered w-full">
-                    <option :for={{val, label} <- [{"all", "All Priorities"}, {"emergency", "Emergency"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"}]} value={val} selected={@filter_priority == val}>
-                      {label}
-                    </option>
-                  </select>
-                </form>
+              <!-- Priority combobox -->
+              <div class="relative" phx-click-away="close_priority_filter">
+                <button phx-click="toggle_priority_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                  <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span :if={MapSet.size(@filter_priorities) == 0} class="text-base-content/60">All Priorities</span>
+                    <span :if={MapSet.size(@filter_priorities) > 0} class="flex items-center gap-1">
+                      <span class="badge badge-xs badge-primary">{MapSet.size(@filter_priorities)}</span>
+                      <span class="text-xs truncate">selected</span>
+                    </span>
+                  </div>
+                  <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                </button>
+                <div :if={@show_priority_filter} class="absolute z-30 mt-1 w-64 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                  <div class="p-2 border-b border-base-200">
+                    <form phx-change="search_priority_filter">
+                      <input type="text" name="query" value={@priority_filter_search} placeholder="Search priorities..." class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                    </form>
+                  </div>
+                  <div class="max-h-56 overflow-y-auto p-1">
+                    <button
+                      :for={{val, label} <- filtered_ticket_priorities(@priority_filter_search)}
+                      phx-click="toggle_priority_item"
+                      phx-value-id={val}
+                      class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                    >
+                      <div class={["w-4 h-4 rounded border flex items-center justify-center shrink-0", MapSet.member?(@filter_priorities, val) && "bg-primary border-primary", !MapSet.member?(@filter_priorities, val) && "border-base-300"]}>
+                        <.icon :if={MapSet.member?(@filter_priorities, val)} name="hero-check" class="size-2.5 text-primary-content" />
+                      </div>
+                      <span class={["w-2.5 h-2.5 rounded-full shrink-0", priority_dot_color_filter(val)]}></span>
+                      <span class="text-sm">{label}</span>
+                    </button>
+                  </div>
+                  <div class="p-2 border-t border-base-200 flex justify-between">
+                    <button phx-click="clear_priority_filter" class="btn btn-xs btn-ghost">Clear</button>
+                    <button phx-click="toggle_priority_filter" class="btn btn-xs btn-primary">Done</button>
+                  </div>
+                </div>
               </div>
 
-              <!-- Category -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Category</label>
-                <form phx-change="set_filter_category">
-                  <select name="category" class="select select-sm select-bordered w-full">
-                    <option value="all" selected={@filter_category == "all"}>All Categories</option>
-                    <option :for={cat <- @all_categories} value={cat} selected={@filter_category == cat}>
-                      {String.capitalize(cat)}
-                    </option>
-                  </select>
-                </form>
+              <!-- Category combobox -->
+              <div class="relative" phx-click-away="close_category_filter">
+                <button phx-click="toggle_category_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                  <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span :if={MapSet.size(@filter_categories) == 0} class="text-base-content/60">All Categories</span>
+                    <span :if={MapSet.size(@filter_categories) > 0} class="flex items-center gap-1">
+                      <span class="badge badge-xs badge-primary">{MapSet.size(@filter_categories)}</span>
+                      <span class="text-xs truncate">selected</span>
+                    </span>
+                  </div>
+                  <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                </button>
+                <div :if={@show_category_filter} class="absolute z-30 mt-1 w-64 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                  <div class="p-2 border-b border-base-200">
+                    <form phx-change="search_category_filter">
+                      <input type="text" name="query" value={@category_filter_search} placeholder="Search categories..." class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                    </form>
+                  </div>
+                  <div class="max-h-56 overflow-y-auto p-1">
+                    <button
+                      :for={cat <- filtered_ticket_categories(@all_categories, @category_filter_search)}
+                      phx-click="toggle_category_item"
+                      phx-value-id={cat}
+                      class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                    >
+                      <div class={["w-4 h-4 rounded border flex items-center justify-center shrink-0", MapSet.member?(@filter_categories, cat) && "bg-primary border-primary", !MapSet.member?(@filter_categories, cat) && "border-base-300"]}>
+                        <.icon :if={MapSet.member?(@filter_categories, cat)} name="hero-check" class="size-2.5 text-primary-content" />
+                      </div>
+                      <span class={["w-2.5 h-2.5 rounded-full shrink-0", category_dot_color_filter(cat)]}></span>
+                      <span class="text-sm">{String.capitalize(cat)}</span>
+                    </button>
+                  </div>
+                  <div class="p-2 border-t border-base-200 flex justify-between">
+                    <button phx-click="clear_category_filter" class="btn btn-xs btn-ghost">Clear</button>
+                    <button phx-click="toggle_category_filter" class="btn btn-xs btn-primary">Done</button>
+                  </div>
+                </div>
               </div>
 
-              <!-- Location -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Location</label>
-                <form phx-change="set_filter_location">
-                  <select name="location_id" class="select select-sm select-bordered w-full">
-                    <option value="all" selected={@filter_location_id == "all"}>All Locations</option>
-                    <option :for={loc <- @all_locations} value={loc.id} selected={@filter_location_id == loc.id}>
-                      {loc.name}
-                    </option>
-                  </select>
-                </form>
+              <!-- Location combobox -->
+              <div class="relative" phx-click-away="close_location_filter">
+                <button phx-click="toggle_location_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                  <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span :if={MapSet.size(@filter_location_ids) == 0} class="text-base-content/60">All Locations</span>
+                    <span :if={MapSet.size(@filter_location_ids) > 0} class="flex items-center gap-1">
+                      <span class="badge badge-xs badge-primary">{MapSet.size(@filter_location_ids)}</span>
+                      <span class="text-xs truncate">selected</span>
+                    </span>
+                  </div>
+                  <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                </button>
+                <div :if={@show_location_filter} class="absolute z-30 mt-1 w-72 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                  <div class="p-2 border-b border-base-200">
+                    <form phx-change="search_location_filter">
+                      <input type="text" name="query" value={@location_filter_search} placeholder="Search locations..." class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                    </form>
+                  </div>
+                  <div class="max-h-56 overflow-y-auto p-1">
+                    <button
+                      :for={loc <- filtered_ticket_locations(@all_locations, @location_filter_search)}
+                      phx-click="toggle_location_item"
+                      phx-value-id={loc.id}
+                      style={"padding-left: #{loc.depth * 16 + 8}px"}
+                      class="flex items-center gap-2.5 w-full pr-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                    >
+                      <div class={["w-4 h-4 rounded border flex items-center justify-center shrink-0", MapSet.member?(@filter_location_ids, loc.id) && "bg-primary border-primary", !MapSet.member?(@filter_location_ids, loc.id) && "border-base-300"]}>
+                        <.icon :if={MapSet.member?(@filter_location_ids, loc.id)} name="hero-check" class="size-2.5 text-primary-content" />
+                      </div>
+                      <span class="text-sm flex-1 min-w-0 truncate">{loc.name}</span>
+                      <span :if={loc.label} class="badge badge-xs badge-ghost ml-auto shrink-0">{loc.label}</span>
+                    </button>
+                  </div>
+                  <div class="p-2 border-t border-base-200 flex justify-between">
+                    <button phx-click="clear_location_filter" class="btn btn-xs btn-ghost">Clear</button>
+                    <button phx-click="toggle_location_filter" class="btn btn-xs btn-primary">Done</button>
+                  </div>
+                </div>
               </div>
 
+              <button :if={active_filter_count(assigns) > 0} phx-click="clear_all_filters" class="btn btn-xs btn-ghost text-error gap-1">
+                <.icon name="hero-x-mark" class="size-3" /> Clear
+              </button>
+            </div>
+
+            <!-- Row 2: Date range + Assignee -->
+            <div class="grid grid-cols-2 gap-4">
               <!-- Date Range -->
-              <div class="col-span-2 relative">
+              <div class="relative">
                 <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date Range</label>
                 <button
                   type="button"
@@ -371,7 +495,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
               </div>
 
               <!-- Assigned To (multi-select combobox) -->
-              <div class="col-span-2">
+              <div>
                 <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Assigned To</label>
                 <div class="relative">
                   <div class="flex flex-wrap gap-1.5 p-1.5 min-h-[36px] border border-base-300 rounded-lg bg-base-100 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20">
@@ -1215,20 +1339,96 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, assign(socket, :show_filters, !socket.assigns.show_filters)}
   end
 
-  def handle_event("set_filter_status", %{"status" => status}, socket) do
-    {:noreply, socket |> assign(:filter_status, status) |> reload_data()}
+  # --- Status filter combobox ---
+  def handle_event("toggle_status_filter", _, socket) do
+    {:noreply, assign(socket, :show_status_filter, !socket.assigns.show_status_filter)}
   end
 
-  def handle_event("set_filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, socket |> assign(:filter_priority, priority) |> reload_data()}
+  def handle_event("close_status_filter", _, socket) do
+    {:noreply, assign(socket, show_status_filter: false, status_filter_search: "")}
   end
 
-  def handle_event("set_filter_category", %{"category" => category}, socket) do
-    {:noreply, socket |> assign(:filter_category, category) |> reload_data()}
+  def handle_event("search_status_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :status_filter_search, query)}
   end
 
-  def handle_event("set_filter_location", %{"location_id" => location_id}, socket) do
-    {:noreply, socket |> assign(:filter_location_id, location_id) |> reload_data()}
+  def handle_event("toggle_status_item", %{"id" => val}, socket) do
+    statuses = socket.assigns.filter_statuses
+    statuses = if MapSet.member?(statuses, val), do: MapSet.delete(statuses, val), else: MapSet.put(statuses, val)
+    {:noreply, socket |> assign(:filter_statuses, statuses) |> reload_data()}
+  end
+
+  def handle_event("clear_status_filter", _, socket) do
+    {:noreply, socket |> assign(filter_statuses: MapSet.new(), status_filter_search: "") |> reload_data()}
+  end
+
+  # --- Priority filter combobox ---
+  def handle_event("toggle_priority_filter", _, socket) do
+    {:noreply, assign(socket, :show_priority_filter, !socket.assigns.show_priority_filter)}
+  end
+
+  def handle_event("close_priority_filter", _, socket) do
+    {:noreply, assign(socket, show_priority_filter: false, priority_filter_search: "")}
+  end
+
+  def handle_event("search_priority_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :priority_filter_search, query)}
+  end
+
+  def handle_event("toggle_priority_item", %{"id" => val}, socket) do
+    priorities = socket.assigns.filter_priorities
+    priorities = if MapSet.member?(priorities, val), do: MapSet.delete(priorities, val), else: MapSet.put(priorities, val)
+    {:noreply, socket |> assign(:filter_priorities, priorities) |> reload_data()}
+  end
+
+  def handle_event("clear_priority_filter", _, socket) do
+    {:noreply, socket |> assign(filter_priorities: MapSet.new(), priority_filter_search: "") |> reload_data()}
+  end
+
+  # --- Category filter combobox ---
+  def handle_event("toggle_category_filter", _, socket) do
+    {:noreply, assign(socket, :show_category_filter, !socket.assigns.show_category_filter)}
+  end
+
+  def handle_event("close_category_filter", _, socket) do
+    {:noreply, assign(socket, show_category_filter: false, category_filter_search: "")}
+  end
+
+  def handle_event("search_category_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :category_filter_search, query)}
+  end
+
+  def handle_event("toggle_category_item", %{"id" => val}, socket) do
+    categories = socket.assigns.filter_categories
+    categories = if MapSet.member?(categories, val), do: MapSet.delete(categories, val), else: MapSet.put(categories, val)
+    {:noreply, socket |> assign(:filter_categories, categories) |> reload_data()}
+  end
+
+  def handle_event("clear_category_filter", _, socket) do
+    {:noreply, socket |> assign(filter_categories: MapSet.new(), category_filter_search: "") |> reload_data()}
+  end
+
+  # --- Location filter combobox ---
+  def handle_event("toggle_location_filter", _, socket) do
+    {:noreply, assign(socket, :show_location_filter, !socket.assigns.show_location_filter)}
+  end
+
+  def handle_event("close_location_filter", _, socket) do
+    {:noreply, assign(socket, show_location_filter: false, location_filter_search: "")}
+  end
+
+  def handle_event("search_location_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :location_filter_search, query)}
+  end
+
+  def handle_event("toggle_location_item", %{"id" => val}, socket) do
+    location_ids = socket.assigns.filter_location_ids
+    location_ids = if MapSet.member?(location_ids, val), do: MapSet.delete(location_ids, val), else: MapSet.put(location_ids, val)
+    {:noreply, socket |> assign(:filter_location_ids, location_ids) |> reload_data()}
+  end
+
+  def handle_event("clear_location_filter", _, socket) do
+    {:noreply, socket |> assign(filter_location_ids: MapSet.new(), location_filter_search: "") |> reload_data()}
   end
 
   # --- Date Range Picker ---
@@ -1314,22 +1514,6 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, socket |> assign(:filter_assignee_ids, ids) |> reload_data()}
   end
 
-  def handle_event("clear_filter", %{"id" => "status"}, socket) do
-    {:noreply, socket |> assign(:filter_status, "all") |> reload_data()}
-  end
-
-  def handle_event("clear_filter", %{"id" => "priority"}, socket) do
-    {:noreply, socket |> assign(:filter_priority, "all") |> reload_data()}
-  end
-
-  def handle_event("clear_filter", %{"id" => "category"}, socket) do
-    {:noreply, socket |> assign(:filter_category, "all") |> reload_data()}
-  end
-
-  def handle_event("clear_filter", %{"id" => "location"}, socket) do
-    {:noreply, socket |> assign(:filter_location_id, "all") |> reload_data()}
-  end
-
   def handle_event("clear_filter", %{"id" => "date_range"}, socket) do
     {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> reload_data()}
   end
@@ -1338,15 +1522,19 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply,
      socket
      |> assign(
-       filter_status: "all",
-       filter_priority: "all",
-       filter_category: "all",
+       filter_statuses: MapSet.new(),
+       filter_priorities: MapSet.new(),
+       filter_categories: MapSet.new(),
+       filter_location_ids: MapSet.new(),
        filter_date_from: nil,
        filter_date_to: nil,
        filter_assignee_ids: MapSet.new(),
-       filter_location_id: "all",
        assignee_search: "",
-       search_query: ""
+       search_query: "",
+       status_filter_search: "",
+       priority_filter_search: "",
+       category_filter_search: "",
+       location_filter_search: ""
      )
      |> reload_data()}
   end
@@ -1696,10 +1884,10 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp build_filters(assigns) do
     filters = %{}
-    filters = if assigns.filter_status != "all", do: Map.put(filters, :status, assigns.filter_status), else: filters
-    filters = if assigns.filter_priority != "all", do: Map.put(filters, :priority, assigns.filter_priority), else: filters
-    filters = if assigns.filter_category != "all", do: Map.put(filters, :category, assigns.filter_category), else: filters
-    filters = if assigns.filter_location_id != "all", do: Map.put(filters, :location_id, assigns.filter_location_id), else: filters
+    filters = if MapSet.size(assigns.filter_statuses) > 0, do: Map.put(filters, :status, assigns.filter_statuses), else: filters
+    filters = if MapSet.size(assigns.filter_priorities) > 0, do: Map.put(filters, :priority, assigns.filter_priorities), else: filters
+    filters = if MapSet.size(assigns.filter_categories) > 0, do: Map.put(filters, :category, assigns.filter_categories), else: filters
+    filters = if MapSet.size(assigns.filter_location_ids) > 0, do: Map.put(filters, :location_id, assigns.filter_location_ids), else: filters
     filters = if assigns.filter_date_from, do: Map.put(filters, :date_from, assigns.filter_date_from), else: filters
     filters = if assigns.filter_date_to, do: Map.put(filters, :date_to, assigns.filter_date_to), else: filters
     filters = if MapSet.size(assigns.filter_assignee_ids) > 0, do: Map.put(filters, :assignee_ids, assigns.filter_assignee_ids), else: filters
@@ -1708,10 +1896,10 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   defp matches_filters?(ticket, assigns) do
-    (assigns.filter_status == "all" || ticket.status == assigns.filter_status) &&
-      (assigns.filter_priority == "all" || ticket.priority == assigns.filter_priority) &&
-      (assigns.filter_category == "all" || ticket.category == assigns.filter_category) &&
-      (assigns.filter_location_id == "all" || ticket.location_id == assigns.filter_location_id) &&
+    (MapSet.size(assigns.filter_statuses) == 0 || MapSet.member?(assigns.filter_statuses, ticket.status)) &&
+      (MapSet.size(assigns.filter_priorities) == 0 || MapSet.member?(assigns.filter_priorities, ticket.priority)) &&
+      (MapSet.size(assigns.filter_categories) == 0 || MapSet.member?(assigns.filter_categories, ticket.category)) &&
+      (MapSet.size(assigns.filter_location_ids) == 0 || MapSet.member?(assigns.filter_location_ids, ticket.location_id)) &&
       (MapSet.size(assigns.filter_assignee_ids) == 0 ||
         MapSet.member?(assigns.filter_assignee_ids, ticket.assigned_to_user_id) ||
         MapSet.member?(assigns.filter_assignee_ids, ticket.assigned_to_org_id))
@@ -1821,10 +2009,10 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp active_filter_count(assigns) do
     count = 0
-    count = if assigns.filter_status != "all", do: count + 1, else: count
-    count = if assigns.filter_priority != "all", do: count + 1, else: count
-    count = if assigns.filter_category != "all", do: count + 1, else: count
-    count = if assigns.filter_location_id != "all", do: count + 1, else: count
+    count = if MapSet.size(assigns.filter_statuses) > 0, do: count + 1, else: count
+    count = if MapSet.size(assigns.filter_priorities) > 0, do: count + 1, else: count
+    count = if MapSet.size(assigns.filter_categories) > 0, do: count + 1, else: count
+    count = if MapSet.size(assigns.filter_location_ids) > 0, do: count + 1, else: count
     count = if assigns.filter_date_from || assigns.filter_date_to, do: count + 1, else: count
     count + MapSet.size(assigns.filter_assignee_ids)
   end
@@ -2010,4 +2198,48 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp timeline_event_text(%{body: body}) do
     body
   end
+
+  # --- Combobox filter helpers ---
+
+  @ticket_statuses [{"created", "Open"}, {"triaged", "Triaged"}, {"assigned", "Assigned"}, {"in_progress", "In Progress"}, {"on_hold", "On Hold"}, {"completed", "Completed"}, {"reviewed", "Reviewed"}, {"closed", "Closed"}]
+  @ticket_priorities [{"emergency", "Emergency"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"}]
+
+  defp filtered_ticket_statuses(""), do: @ticket_statuses
+  defp filtered_ticket_statuses(q) do
+    q = String.downcase(q)
+    Enum.filter(@ticket_statuses, fn {_, label} -> String.contains?(String.downcase(label), q) end)
+  end
+
+  defp filtered_ticket_priorities(""), do: @ticket_priorities
+  defp filtered_ticket_priorities(q) do
+    q = String.downcase(q)
+    Enum.filter(@ticket_priorities, fn {_, label} -> String.contains?(String.downcase(label), q) end)
+  end
+
+  defp filtered_ticket_categories(categories, ""), do: categories
+  defp filtered_ticket_categories(categories, q) do
+    q = String.downcase(q)
+    Enum.filter(categories, fn cat -> String.contains?(String.downcase(cat), q) end)
+  end
+
+  defp filtered_ticket_locations(locations, ""), do: locations
+  defp filtered_ticket_locations(locations, q) do
+    q = String.downcase(q)
+    Enum.filter(locations, fn loc -> String.contains?(String.downcase(loc.name), q) end)
+  end
+
+  defp priority_dot_color_filter("emergency"), do: "bg-red-500"
+  defp priority_dot_color_filter("high"), do: "bg-orange-500"
+  defp priority_dot_color_filter("medium"), do: "bg-yellow-500"
+  defp priority_dot_color_filter("low"), do: "bg-blue-500"
+  defp priority_dot_color_filter(_), do: "bg-gray-400"
+
+  defp category_dot_color_filter("hvac"), do: "bg-red-500"
+  defp category_dot_color_filter("plumbing"), do: "bg-blue-500"
+  defp category_dot_color_filter("electrical"), do: "bg-yellow-500"
+  defp category_dot_color_filter("structural"), do: "bg-stone-500"
+  defp category_dot_color_filter("appliance"), do: "bg-purple-500"
+  defp category_dot_color_filter("furniture"), do: "bg-emerald-500"
+  defp category_dot_color_filter("it"), do: "bg-cyan-500"
+  defp category_dot_color_filter(_), do: "bg-gray-400"
 end
