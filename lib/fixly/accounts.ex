@@ -8,6 +8,15 @@ defmodule Fixly.Accounts do
 
   alias Fixly.Accounts.{User, UserToken, UserNotifier}
 
+  @doc "List users (org_admin or technician) for a given organization."
+  def list_users_by_organization(org_id) do
+    User
+    |> where([u], u.organization_id == ^org_id)
+    |> where([u], u.role in ["org_admin", "technician"])
+    |> order_by([u], u.name)
+    |> Repo.all()
+  end
+
   ## Database getters
 
   @doc """

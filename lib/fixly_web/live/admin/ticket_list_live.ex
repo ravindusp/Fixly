@@ -234,7 +234,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp ticket_row(assigns) do
     ~H"""
-    <div class="grid grid-cols-[3fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 cursor-pointer transition-colors">
+    <.link navigate={~p"/admin/tickets/#{@ticket.id}"} class="grid grid-cols-[3fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 cursor-pointer transition-colors">
       <!-- Ticket info -->
       <div class="flex items-center gap-3 min-w-0">
         <div>
@@ -298,7 +298,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       <div>
         <p class="text-sm text-base-content/60">{format_date(@ticket.inserted_at)}</p>
       </div>
-    </div>
+    </.link>
     """
   end
 
@@ -346,7 +346,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp kanban_card(assigns) do
     ~H"""
-    <div class="bg-base-100 rounded-lg border border-base-300 p-3.5 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+    <.link navigate={~p"/admin/tickets/#{@ticket.id}"} class="block bg-base-100 rounded-lg border border-base-300 p-3.5 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
       <div class="flex items-start justify-between gap-2 mb-2">
         <div class="flex flex-wrap gap-1.5">
           <.priority_badge :if={@ticket.priority} priority={@ticket.priority} />
@@ -375,7 +375,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         <span :if={!@ticket.assigned_to_user} class="text-[10px] text-base-content/30">Unassigned</span>
         <span class="text-xs text-base-content/40">{format_date(@ticket.inserted_at)}</span>
       </div>
-    </div>
+    </.link>
     """
   end
 

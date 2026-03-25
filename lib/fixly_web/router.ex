@@ -27,7 +27,11 @@ defmodule FixlyWeb.Router do
   scope "/r", FixlyWeb do
     pipe_through :browser
 
-    # live "/:qr_code_id", Public.TicketSubmitLive, :new
+    live_session :public_ticket,
+      on_mount: [{FixlyWeb.UserAuth, :mount_current_scope}],
+      layout: {FixlyWeb.Layouts, :public} do
+      live "/:qr_code_id", Public.TicketSubmitLive, :new
+    end
   end
 
   # Admin routes (authenticated)
@@ -38,8 +42,31 @@ defmodule FixlyWeb.Router do
       on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/tickets", TicketListLive, :index
-      # live "/tickets/:id", TicketDetailLive, :show
+      live "/tickets/:id", TicketDetailLive, :show
       live "/locations", LocationTreeLive, :index
+    end
+  end
+
+  # Contractor routes (authenticated)
+  scope "/contractor", FixlyWeb.Contractor do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :contractor,
+      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      layout: {FixlyWeb.Layouts, :app} do
+      live "/tickets", TicketListLive, :index
+      live "/tickets/:id", TicketDetailLive, :show
+    end
+  end
+
+  # Technician routes (authenticated)
+  scope "/tech", FixlyWeb.Technician do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :technician,
+      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      layout: {FixlyWeb.Layouts, :app} do
+      live "/tickets", MyTicketsLive, :index
     end
   end
 

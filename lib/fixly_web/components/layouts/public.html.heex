@@ -1,0 +1,25 @@
+<div class="min-h-screen bg-base-200">
+  <!-- Header -->
+  <header class="bg-base-100 border-b border-base-300 shadow-sm">
+    <div class="max-w-lg mx-auto px-4 h-14 flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+        <.icon name="hero-wrench-screwdriver" class="size-4 text-primary-content" />
+      </div>
+      <span class="text-lg font-semibold text-base-content tracking-tight">Fixly</span>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="max-w-lg mx-auto px-4 py-6">
+    {@inner_content}
+  </main>
+
+  <!-- Footer -->
+  <footer class="max-w-lg mx-auto px-4 py-8 text-center">
+    <p class="text-xs text-base-content/40">
+      Powered by Fixly &middot; Maintenance Management
+    </p>
+  </footer>
+</div>
+
+<.flash_group flash={@flash} />
