@@ -7,14 +7,16 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    tickets = Tickets.list_user_tickets(user.id)
 
     socket =
       socket
       |> assign(:page_title, "My Tickets")
-      |> assign(:tickets, tickets)
       |> assign(:user, user)
       |> assign(:selected_ticket_id, nil)
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> assign(:ticket_count, 0)
+      |> reload_data()
 
     {:ok, socket}
   end
@@ -27,42 +29,53 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-lg font-semibold text-base-content">My Tickets</h2>
-          <p class="text-sm text-base-content/50">{length(@tickets)} active tickets assigned to you</p>
+          <p class="text-sm text-base-content/50">{@ticket_count} active tickets assigned to you</p>
         </div>
       </div>
 
-      <%= if @tickets == [] do %>
-        <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
-          <div class="flex flex-col items-center justify-center py-16 text-center">
-            <div class="w-14 h-14 rounded-2xl bg-success/10 flex items-center justify-center mb-4">
-              <.icon name="hero-check-circle" class="size-7 text-success" />
-            </div>
-            <h3 class="text-base font-semibold text-base-content mb-1">All caught up!</h3>
-            <p class="text-sm text-base-content/50">No tickets assigned to you right now.</p>
+      <div id="technician-tickets-stream" phx-update="stream">
+        <.ticket_card
+          :for={{dom_id, ticket} <- @streams.tickets}
+          id={dom_id}
+          ticket={ticket}
+          expanded={@selected_ticket_id == ticket.id}
+        />
+      </div>
+
+      <!-- Empty state -->
+      <div :if={@ticket_count == 0} class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+        <div class="flex flex-col items-center justify-center py-16 text-center">
+          <div class="w-14 h-14 rounded-2xl bg-success/10 flex items-center justify-center mb-4">
+            <.icon name="hero-check-circle" class="size-7 text-success" />
           </div>
+          <h3 class="text-base font-semibold text-base-content mb-1">All caught up!</h3>
+          <p class="text-sm text-base-content/50">No tickets assigned to you right now.</p>
         </div>
-      <% else %>
-        <!-- Ticket cards (mobile-optimized) -->
-        <div class="space-y-3">
-          <.ticket_card
-            :for={ticket <- @tickets}
-            ticket={ticket}
-            expanded={@selected_ticket_id == ticket.id}
-          />
-        </div>
-      <% end %>
+      </div>
+
+      <!-- Infinite scroll sentinel -->
+      <div
+        :if={@has_more}
+        id="technician-tickets-scroll"
+        phx-hook="InfiniteScroll"
+        data-has-more={to_string(@has_more)}
+        class="flex justify-center py-4"
+      >
+        <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+      </div>
     </div>
     """
   end
 
   # --- Ticket Card (mobile-first design) ---
 
+  attr :id, :string, required: true
   attr :ticket, Ticket, required: true
   attr :expanded, :boolean, default: false
 
   defp ticket_card(assigns) do
     ~H"""
-    <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-hidden">
+    <div id={@id} class="bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-hidden mb-3">
       <!-- Card header — always visible -->
       <div
         class="px-4 py-3.5 cursor-pointer hover:bg-base-200/30 transition-colors"
@@ -216,6 +229,20 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   # --- Events ---
 
   @impl true
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more && socket.assigns.cursor do
+      page = Tickets.list_user_tickets_paginated(socket.assigns.user.id, socket.assigns.cursor)
+
+      {:noreply,
+       socket
+       |> assign(:cursor, page.cursor)
+       |> assign(:has_more, page.has_more)
+       |> stream(:tickets, page.entries)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("toggle_ticket", %{"id" => id}, socket) do
     selected =
       if socket.assigns.selected_ticket_id == id, do: nil, else: id
@@ -238,18 +265,28 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
     {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
 
-    # Log the status change
     Tickets.log_activity(id, "status_change", "Status changed to #{status}", %{
       from: ticket.status,
       to: status
     })
 
-    # Reload
-    tickets = Tickets.list_user_tickets(socket.assigns.user.id)
-    {:noreply, assign(socket, :tickets, tickets)}
+    # If completed/closed, ticket drops from active list — just reload
+    {:noreply, reload_data(socket)}
   end
 
   # --- Helpers ---
+
+  defp reload_data(socket) do
+    user = socket.assigns.user
+    count = Tickets.count_user_tickets(user.id)
+    page = Tickets.list_user_tickets_paginated(user.id)
+
+    socket
+    |> assign(:ticket_count, count)
+    |> assign(:cursor, page.cursor)
+    |> assign(:has_more, page.has_more)
+    |> stream(:tickets, page.entries, reset: true)
+  end
 
   defp sla_remaining_text(%{sla_deadline: nil}), do: "No deadline"
   defp sla_remaining_text(%{sla_deadline: _deadline, sla_paused_at: paused_at}) when not is_nil(paused_at) do

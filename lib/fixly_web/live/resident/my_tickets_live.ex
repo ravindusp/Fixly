@@ -1,21 +1,22 @@
 defmodule FixlyWeb.Resident.MyTicketsLive do
   use FixlyWeb, :live_view
 
-  import Ecto.Query
-  alias Fixly.Repo
+  alias Fixly.Tickets
   alias Fixly.Tickets.Ticket
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    tickets = list_resident_tickets(user)
 
     socket =
       socket
       |> assign(:page_title, "My Tickets")
       |> assign(:user, user)
-      |> assign(:tickets, tickets)
       |> assign(:expanded_id, nil)
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> assign(:ticket_count, 0)
+      |> reload_data()
 
     {:ok, socket}
   end
@@ -29,7 +30,7 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
         <div>
           <h1 class="text-2xl font-bold text-base-content">My Tickets</h1>
           <p class="text-sm text-base-content/50 mt-1">
-            {length(@tickets)} {if length(@tickets) == 1, do: "ticket", else: "tickets"} submitted
+            {@ticket_count} {if @ticket_count == 1, do: "ticket", else: "tickets"} submitted
           </p>
         </div>
         <.link navigate={~p"/"} class="btn btn-sm btn-primary gap-1.5">
@@ -38,33 +39,43 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
         </.link>
       </div>
 
-      <!-- Ticket List -->
-      <%= if @tickets == [] do %>
-        <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
-          <div class="flex flex-col items-center justify-center py-20 text-center px-6">
-            <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-              <.icon name="hero-ticket" class="size-8 text-primary" />
-            </div>
-            <h3 class="text-lg font-semibold text-base-content mb-2">No tickets yet</h3>
-            <p class="text-sm text-base-content/50 max-w-md mb-4">
-              You haven't submitted any maintenance requests yet. Scan a QR code at your location or use the button above to report an issue.
-            </p>
-            <.link navigate={~p"/"} class="btn btn-primary gap-1.5">
-              <.icon name="hero-plus" class="size-4" />
-              Report an Issue
-            </.link>
+      <!-- Ticket List (streamed) -->
+      <div id="resident-tickets-stream" phx-update="stream">
+        <.resident_ticket_card
+          :for={{dom_id, ticket} <- @streams.tickets}
+          id={dom_id}
+          ticket={ticket}
+          expanded={@expanded_id == ticket.id}
+        />
+      </div>
+
+      <!-- Empty state -->
+      <div :if={@ticket_count == 0} class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+        <div class="flex flex-col items-center justify-center py-20 text-center px-6">
+          <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+            <.icon name="hero-ticket" class="size-8 text-primary" />
           </div>
+          <h3 class="text-lg font-semibold text-base-content mb-2">No tickets yet</h3>
+          <p class="text-sm text-base-content/50 max-w-md mb-4">
+            You haven't submitted any maintenance requests yet. Scan a QR code at your location or use the button above to report an issue.
+          </p>
+          <.link navigate={~p"/"} class="btn btn-primary gap-1.5">
+            <.icon name="hero-plus" class="size-4" />
+            Report an Issue
+          </.link>
         </div>
-      <% else %>
-        <div class="space-y-3">
-          <%= for ticket <- @tickets do %>
-            <.resident_ticket_card
-              ticket={ticket}
-              expanded={@expanded_id == ticket.id}
-            />
-          <% end %>
-        </div>
-      <% end %>
+      </div>
+
+      <!-- Infinite scroll sentinel -->
+      <div
+        :if={@has_more}
+        id="resident-tickets-scroll"
+        phx-hook="InfiniteScroll"
+        data-has-more={to_string(@has_more)}
+        class="flex justify-center py-4"
+      >
+        <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+      </div>
     </div>
     """
   end
@@ -73,12 +84,13 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
   # TICKET CARD (expandable)
   # ==========================================
 
+  attr :id, :string, required: true
   attr :ticket, Ticket, required: true
   attr :expanded, :boolean, default: false
 
   defp resident_ticket_card(assigns) do
     ~H"""
-    <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-hidden">
+    <div id={@id} class="bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-hidden mb-3">
       <!-- Card header (always visible, click to expand) -->
       <div
         class="px-5 py-4 cursor-pointer hover:bg-base-200/30 transition-colors"
@@ -231,7 +243,6 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
     ]
 
     current_idx = Enum.find_index(steps, fn {s, _, _} -> s == assigns.status end) || 0
-    # on_hold and reviewed are special states -- map them
     current_idx =
       case assigns.status do
         "on_hold" -> 3
@@ -290,6 +301,21 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
   # ==========================================
 
   @impl true
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more && socket.assigns.cursor do
+      user = socket.assigns.user
+      page = Tickets.list_resident_tickets_paginated(user.id, user.email, socket.assigns.cursor)
+
+      {:noreply,
+       socket
+       |> assign(:cursor, page.cursor)
+       |> assign(:has_more, page.has_more)
+       |> stream(:tickets, page.entries)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("toggle_ticket", %{"id" => id}, socket) do
     expanded_id =
       if socket.assigns.expanded_id == id do
@@ -305,14 +331,16 @@ defmodule FixlyWeb.Resident.MyTicketsLive do
   # HELPERS
   # ==========================================
 
-  defp list_resident_tickets(user) do
-    query =
-      Ticket
-      |> where([t], t.submitter_user_id == ^user.id or t.submitter_email == ^(user.email || ""))
-      |> order_by([t], [desc: t.inserted_at])
-      |> preload([:location, :attachments])
+  defp reload_data(socket) do
+    user = socket.assigns.user
+    count = Tickets.count_resident_tickets(user.id, user.email)
+    page = Tickets.list_resident_tickets_paginated(user.id, user.email)
 
-    Repo.all(query)
+    socket
+    |> assign(:ticket_count, count)
+    |> assign(:cursor, page.cursor)
+    |> assign(:has_more, page.has_more)
+    |> stream(:tickets, page.entries, reset: true)
   end
 
   defp format_status("created"), do: "Submitted"

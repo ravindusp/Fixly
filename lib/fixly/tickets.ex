@@ -118,6 +118,56 @@ defmodule Fixly.Tickets do
     |> Repo.all()
   end
 
+  @doc "Paginated contractor tickets with DB counts."
+  def list_contractor_tickets_paginated(contractor_org_id, cursor \\ nil) do
+    Ticket
+    |> where([t], t.assigned_to_org_id == ^contractor_org_id)
+    |> preload([:location, :assigned_to_user])
+    |> Fixly.Pagination.paginate_desc(cursor: cursor)
+  end
+
+  @doc "Count contractor tickets by status."
+  def count_contractor_tickets_by_status(contractor_org_id) do
+    Ticket
+    |> where([t], t.assigned_to_org_id == ^contractor_org_id)
+    |> group_by([t], t.status)
+    |> select([t], {t.status, count(t.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "Paginated technician tickets."
+  def list_user_tickets_paginated(user_id, cursor \\ nil) do
+    Ticket
+    |> where([t], t.assigned_to_user_id == ^user_id)
+    |> where([t], t.status not in ["closed", "reviewed"])
+    |> preload([:location, :attachments])
+    |> Fixly.Pagination.paginate_desc(cursor: cursor)
+  end
+
+  @doc "Count active tickets for a technician."
+  def count_user_tickets(user_id) do
+    Ticket
+    |> where([t], t.assigned_to_user_id == ^user_id)
+    |> where([t], t.status not in ["closed", "reviewed"])
+    |> Repo.aggregate(:count, :id)
+  end
+
+  @doc "Paginated resident tickets (by submitter)."
+  def list_resident_tickets_paginated(user_id, user_email, cursor \\ nil) do
+    Ticket
+    |> where([t], t.submitter_user_id == ^user_id or t.submitter_email == ^(user_email || ""))
+    |> preload([:location, :attachments])
+    |> Fixly.Pagination.paginate_desc(cursor: cursor)
+  end
+
+  @doc "Count resident tickets."
+  def count_resident_tickets(user_id, user_email) do
+    Ticket
+    |> where([t], t.submitter_user_id == ^user_id or t.submitter_email == ^(user_email || ""))
+    |> Repo.aggregate(:count, :id)
+  end
+
   @doc "List tickets assigned to a specific technician."
   def list_user_tickets(user_id) do
     Ticket

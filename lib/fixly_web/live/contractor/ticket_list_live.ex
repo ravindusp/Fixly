@@ -2,7 +2,6 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   use FixlyWeb, :live_view
 
   alias Fixly.Tickets
-  alias Fixly.Tickets.Ticket
   alias Fixly.Accounts
 
   @impl true
@@ -10,25 +9,17 @@ defmodule FixlyWeb.Contractor.TicketListLive do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
 
-    tickets = Tickets.list_contractor_tickets(org_id)
     technicians = Accounts.list_users_by_organization(org_id)
-
-    counts = %{
-      total: length(tickets),
-      open: length(Enum.filter(tickets, &(&1.status in ["created", "triaged", "assigned"]))),
-      in_progress: length(Enum.filter(tickets, &(&1.status == "in_progress"))),
-      on_hold: length(Enum.filter(tickets, &(&1.status == "on_hold"))),
-      completed: length(Enum.filter(tickets, &(&1.status in ["completed", "reviewed", "closed"])))
-    }
 
     socket =
       socket
       |> assign(:page_title, "Assigned Tickets")
-      |> assign(:tickets, tickets)
       |> assign(:technicians, technicians)
-      |> assign(:counts, counts)
       |> assign(:org_id, org_id)
       |> assign(:selected_ticket, nil)
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> reload_data()
 
     {:ok, socket}
   end
@@ -49,33 +40,25 @@ defmodule FixlyWeb.Contractor.TicketListLive do
       <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
         <div class="flex items-center justify-between px-5 py-3.5 border-b border-base-300">
           <h2 class="text-sm font-semibold text-base-content">Tickets Assigned to Your Team</h2>
-          <div class="relative">
-            <.icon name="hero-magnifying-glass" class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
-            <input type="text" placeholder="Search..." class="input input-sm input-bordered pl-9 w-48" />
-          </div>
         </div>
 
-        <%= if @tickets == [] do %>
-          <div class="flex flex-col items-center justify-center py-16 text-center">
-            <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
-              <.icon name="hero-inbox" class="size-6 text-base-content/30" />
-            </div>
-            <h3 class="text-base font-semibold text-base-content mb-1">No tickets assigned yet</h3>
-            <p class="text-sm text-base-content/50">Tickets will appear here when the school admin assigns work to your team.</p>
-          </div>
-        <% else %>
-          <!-- Table header -->
-          <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
-            <span>Ticket</span>
-            <span>Location</span>
-            <span>Priority</span>
-            <span>Status</span>
-            <span>Assigned To</span>
-            <span></span>
-          </div>
+        <!-- Table header -->
+        <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+          <span>Ticket</span>
+          <span>Location</span>
+          <span>Priority</span>
+          <span>Status</span>
+          <span>Assigned To</span>
+          <span></span>
+        </div>
 
-          <!-- Rows -->
-          <div :for={ticket <- @tickets} class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 transition-colors">
+        <!-- Rows (streamed) -->
+        <div id="contractor-tickets-stream" phx-update="stream">
+          <div
+            :for={{dom_id, ticket} <- @streams.tickets}
+            id={dom_id}
+            class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 transition-colors"
+          >
             <div class="min-w-0">
               <p class="text-sm font-medium text-base-content truncate">{truncate(ticket.description, 55)}</p>
               <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
@@ -120,7 +103,27 @@ defmodule FixlyWeb.Contractor.TicketListLive do
               </.link>
             </div>
           </div>
-        <% end %>
+        </div>
+
+        <!-- Empty state -->
+        <div :if={@counts.total == 0} class="flex flex-col items-center justify-center py-16 text-center">
+          <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
+            <.icon name="hero-inbox" class="size-6 text-base-content/30" />
+          </div>
+          <h3 class="text-base font-semibold text-base-content mb-1">No tickets assigned yet</h3>
+          <p class="text-sm text-base-content/50">Tickets will appear here when the school admin assigns work to your team.</p>
+        </div>
+
+        <!-- Infinite scroll sentinel -->
+        <div
+          :if={@has_more}
+          id="contractor-tickets-scroll"
+          phx-hook="InfiniteScroll"
+          data-has-more={to_string(@has_more)}
+          class="flex justify-center py-4"
+        >
+          <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+        </div>
       </div>
     </div>
     """
@@ -198,16 +201,57 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   # --- Events ---
 
   @impl true
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more && socket.assigns.cursor do
+      page = Tickets.list_contractor_tickets_paginated(socket.assigns.org_id, socket.assigns.cursor)
+
+      {:noreply,
+       socket
+       |> assign(:cursor, page.cursor)
+       |> assign(:has_more, page.has_more)
+       |> stream(:tickets, page.entries)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("assign_technician", %{"ticket-id" => ticket_id, "user-id" => user_id}, socket) do
     ticket = Tickets.get_ticket!(ticket_id)
     {:ok, _ticket} = Tickets.assign_ticket(ticket, %{assigned_to_user_id: user_id})
 
-    # Reload tickets
-    tickets = Tickets.list_contractor_tickets(socket.assigns.org_id)
-    {:noreply, assign(socket, :tickets, tickets)}
+    {:noreply, reload_data(socket)}
   end
 
   # --- Helpers ---
+
+  defp reload_data(socket) do
+    org_id = socket.assigns.org_id
+
+    if org_id do
+      status_counts = Tickets.count_contractor_tickets_by_status(org_id)
+      counts = %{
+        total: status_counts |> Map.values() |> Enum.sum(),
+        open: Map.get(status_counts, "created", 0) + Map.get(status_counts, "triaged", 0) + Map.get(status_counts, "assigned", 0),
+        in_progress: Map.get(status_counts, "in_progress", 0),
+        on_hold: Map.get(status_counts, "on_hold", 0),
+        completed: Map.get(status_counts, "completed", 0) + Map.get(status_counts, "reviewed", 0) + Map.get(status_counts, "closed", 0)
+      }
+
+      page = Tickets.list_contractor_tickets_paginated(org_id)
+
+      socket
+      |> assign(:counts, counts)
+      |> assign(:cursor, page.cursor)
+      |> assign(:has_more, page.has_more)
+      |> stream(:tickets, page.entries, reset: true)
+    else
+      socket
+      |> assign(:counts, %{total: 0, open: 0, in_progress: 0, on_hold: 0, completed: 0})
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> stream(:tickets, [], reset: true)
+    end
+  end
 
   defp status_label("created"), do: "Open"
   defp status_label("triaged"), do: "Triaged"
