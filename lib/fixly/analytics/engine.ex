@@ -109,7 +109,7 @@ defmodule Fixly.Analytics.Engine do
       |> Repo.one()
 
     avg_resolution_hours =
-      if avg_resolution, do: Float.round(avg_resolution / 3600, 1), else: nil
+      if avg_resolution, do: avg_resolution |> Decimal.to_float() |> Kernel./(3600) |> Float.round(1), else: nil
 
     %{
       total: total,
@@ -131,12 +131,20 @@ defmodule Fixly.Analytics.Engine do
       :month -> "month"
     end
 
-    query
-    |> group_by([t], fragment("date_trunc(?, ?)", ^trunc_fn, t.inserted_at))
-    |> select([t], {fragment("date_trunc(?, ?)", ^trunc_fn, t.inserted_at), count(t.id)})
-    |> order_by([t], fragment("date_trunc(?, ?)", ^trunc_fn, t.inserted_at))
-    |> Repo.all()
-    |> Enum.map(fn {date, count} -> %{date: date, count: count} end)
+    {sql, params} = Repo.to_sql(:all, query |> select([t], t.inserted_at))
+
+    raw_sql = """
+    SELECT date_trunc($#{length(params) + 1}, sub.inserted_at) AS date, count(*) AS count
+    FROM (#{sql}) AS sub
+    GROUP BY date
+    ORDER BY date
+    """
+
+    %{rows: rows} = Ecto.Adapters.SQL.query!(Repo, raw_sql, params ++ [trunc_fn])
+
+    Enum.map(rows, fn [date, count] ->
+      %{date: date, count: count}
+    end)
   end
 
   @doc "Get breakdown by location for selected location IDs."
