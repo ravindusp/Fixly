@@ -3,7 +3,7 @@ defmodule Fixly.Tickets do
 
   import Ecto.Query
   alias Fixly.Repo
-  alias Fixly.Tickets.{Ticket, TicketAttachment, TicketComment}
+  alias Fixly.Tickets.{Ticket, TicketAttachment, TicketComment, SLAEscalation}
 
   # --- Tickets ---
 
@@ -131,6 +131,40 @@ defmodule Fixly.Tickets do
     |> Ticket.admin_changeset(
       Map.merge(attrs, %{status: "assigned"})
     )
+    |> Repo.update()
+  end
+
+  # --- SLA Escalations ---
+
+  @active_sla_statuses ~w(assigned in_progress on_hold)
+
+  @doc "List all active tickets that need an SLA check (have a deadline, not fully escalated)."
+  def list_tickets_needing_sla_check do
+    Ticket
+    |> where([t], not is_nil(t.sla_deadline))
+    |> where([t], not is_nil(t.sla_started_at))
+    |> where([t], t.status in @active_sla_statuses)
+    |> Repo.all()
+  end
+
+  @doc "Create an SLA escalation record."
+  def create_escalation(attrs) do
+    %SLAEscalation{}
+    |> SLAEscalation.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc "Check if an escalation record already exists for a ticket at a given threshold."
+  def escalation_exists?(ticket_id, threshold) do
+    SLAEscalation
+    |> where([e], e.ticket_id == ^ticket_id and e.threshold == ^threshold)
+    |> Repo.exists?()
+  end
+
+  @doc "Mark a ticket as SLA breached."
+  def mark_sla_breached(%Ticket{} = ticket) do
+    ticket
+    |> Ticket.sla_changeset(%{sla_breached: true})
     |> Repo.update()
   end
 

@@ -42,4 +42,25 @@ defmodule Fixly.Notifications do
       |> Mailer.deliver()
     end
   end
+
+  @doc "Notify a technician that an SLA warning threshold has been reached."
+  def notify_sla_warning(ticket, user, threshold) do
+    ticket
+    |> TicketEmail.sla_warning_email(user, threshold)
+    |> Mailer.deliver()
+  end
+
+  @doc "Notify supervisor/contractor admin that SLA has been breached."
+  def notify_sla_breach(ticket) do
+    ticket
+    |> TicketEmail.sla_breach_email()
+    |> Mailer.deliver()
+  end
+
+  @doc "Notify org admin that SLA is critically overdue (150%)."
+  def notify_sla_critical(ticket, org) do
+    ticket
+    |> TicketEmail.sla_critical_email(org)
+    |> Mailer.deliver()
+  end
 end

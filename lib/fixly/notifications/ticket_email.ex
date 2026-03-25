@@ -105,6 +105,72 @@ defmodule Fixly.Notifications.TicketEmail do
     """)
   end
 
+  def sla_warning_email(ticket, technician, threshold) do
+    location_name = if ticket.location, do: ticket.location.name, else: "Unknown location"
+
+    new()
+    |> to(technician.email)
+    |> from(@from)
+    |> subject("SLA Warning: #{ticket.reference_number} — #{threshold}% elapsed")
+    |> text_body("""
+    SLA WARNING: #{threshold}% of the SLA time has elapsed.
+
+    Reference: #{ticket.reference_number}
+    Location: #{location_name}
+    Priority: #{ticket.priority || "Not set"}
+    SLA Deadline: #{ticket.sla_deadline}
+
+    Please take action to resolve this ticket before the deadline.
+
+    View ticket: #{url()}/tech/tickets
+    """)
+  end
+
+  def sla_breach_email(ticket) do
+    location_name = if ticket.location, do: ticket.location.name, else: "Unknown location"
+
+    new()
+    |> to(admin_email())
+    |> from(@from)
+    |> subject("SLA BREACHED: #{ticket.reference_number}")
+    |> text_body("""
+    SLA BREACHED: The deadline for this ticket has passed.
+
+    Reference: #{ticket.reference_number}
+    Location: #{location_name}
+    Priority: #{ticket.priority || "Not set"}
+    SLA Deadline: #{ticket.sla_deadline}
+    Status: #{ticket.status}
+
+    Immediate attention is required.
+
+    View ticket: #{url()}/admin/tickets/#{ticket.id}
+    """)
+  end
+
+  def sla_critical_email(ticket, org) do
+    location_name = if ticket.location, do: ticket.location.name, else: "Unknown location"
+
+    new()
+    |> to(admin_email())
+    |> from(@from)
+    |> subject("SLA CRITICAL: #{ticket.reference_number} — 150% overdue (#{org.name})")
+    |> text_body("""
+    CRITICAL: This ticket is 150% past its SLA deadline.
+
+    Reference: #{ticket.reference_number}
+    Organization: #{org.name}
+    Location: #{location_name}
+    Priority: #{ticket.priority || "Not set"}
+    SLA Deadline: #{ticket.sla_deadline}
+    Status: #{ticket.status}
+
+    This ticket requires immediate executive attention.
+
+    View ticket: #{url()}/admin/tickets/#{ticket.id}
+    """)
+  end
+
   defp status_label("created"), do: "Open"
   defp status_label("triaged"), do: "Triaged"
   defp status_label("assigned"), do: "Assigned"

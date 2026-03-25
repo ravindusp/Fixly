@@ -76,7 +76,14 @@ config :phoenix, :json_library, Jason
 # Configure Oban for background jobs
 config :fixly, Oban,
   repo: Fixly.Repo,
-  queues: [default: 10, notifications: 5, ai: 3, sla: 2]
+  queues: [default: 10, notifications: 5, ai: 3, sla: 2],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"* * * * *", Fixly.Workers.SLACheckWorker}
+     ]}
+  ]
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

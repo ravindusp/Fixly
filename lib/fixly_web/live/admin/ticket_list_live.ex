@@ -5,11 +5,17 @@ defmodule FixlyWeb.Admin.TicketListLive do
   alias Fixly.Tickets.Ticket
   alias Fixly.Accounts
   alias Fixly.Organizations
+  alias Fixly.PubSubBroadcast
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
+
+    # Subscribe to real-time updates for this org
+    if connected?(socket) && org_id do
+      PubSubBroadcast.subscribe_org(org_id)
+    end
 
     tickets = if org_id, do: Tickets.list_tickets(org_id), else: []
     grouped = group_by_status(tickets)
@@ -37,6 +43,48 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
     {:ok, socket}
   end
+
+  # --- PubSub Handlers (real-time updates from other users/workers) ---
+
+  @impl true
+  def handle_info({:ticket_created, _ticket}, socket) do
+    {:noreply, reload_tickets(socket)}
+  end
+
+  def handle_info({:ticket_updated, ticket}, socket) do
+    socket = reload_tickets(socket)
+
+    # If the updated ticket is the one we have open in the panel, refresh it
+    socket =
+      if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket.id do
+        updated = Tickets.get_ticket!(ticket.id)
+        comments = Tickets.list_comments(ticket.id)
+        assign(socket, selected_ticket: updated, comments: comments)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:sla_breached, _ticket}, socket) do
+    {:noreply, reload_tickets(socket)}
+  end
+
+  def handle_info({:comment_added, _comment}, socket) do
+    # Refresh comments if panel is open
+    socket =
+      if socket.assigns.selected_ticket do
+        comments = Tickets.list_comments(socket.assigns.selected_ticket.id)
+        assign(socket, :comments, comments)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -202,7 +250,13 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </.info_row>
 
           <.info_row :if={@ticket.sla_deadline} label="SLA Deadline">
-            <span class={["text-sm font-medium", sla_color(@ticket)]}>
+            <span
+              id={"sla-timer-#{@ticket.id}"}
+              phx-hook="SLATimer"
+              data-deadline={DateTime.to_iso8601(@ticket.sla_deadline)}
+              data-paused={to_string(not is_nil(@ticket.sla_paused_at))}
+              class={["text-sm font-medium", sla_color(@ticket)]}
+            >
               {sla_text(@ticket)}
             </span>
           </.info_row>
@@ -603,6 +657,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:ok, ticket} = Tickets.set_priority(socket.assigns.selected_ticket, priority)
     ticket = Tickets.get_ticket!(ticket.id)
     Tickets.log_activity(ticket.id, "system", "Priority set to #{priority}")
+    PubSubBroadcast.broadcast_ticket_updated(ticket)
     {:noreply, socket |> assign(selected_ticket: ticket) |> reload_tickets()}
   end
 
@@ -618,12 +673,14 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
     Tickets.log_activity(ticket.id, "status_change", "Status changed to #{status_label(status)}", %{from: ticket.status, to: status})
     updated = Tickets.get_ticket!(ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
   def handle_event("assign_to_org", %{"org_id" => ""}, socket) do
     {:ok, _} = Tickets.update_ticket(socket.assigns.selected_ticket, %{assigned_to_org_id: nil})
     updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
@@ -631,12 +688,14 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:ok, _} = Tickets.assign_ticket(socket.assigns.selected_ticket, %{assigned_to_org_id: org_id})
     Tickets.log_activity(socket.assigns.selected_ticket.id, "assignment", "Assigned to contractor")
     updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
   def handle_event("assign_to_user", %{"user_id" => ""}, socket) do
     {:ok, _} = Tickets.update_ticket(socket.assigns.selected_ticket, %{assigned_to_user_id: nil})
     updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
@@ -644,19 +703,22 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:ok, _} = Tickets.assign_ticket(socket.assigns.selected_ticket, %{assigned_to_user_id: user_id})
     Tickets.log_activity(socket.assigns.selected_ticket.id, "assignment", "Assigned to technician")
     updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
   def handle_event("add_comment", %{"body" => body}, socket) when byte_size(body) > 0 do
     user = socket.assigns.current_user
+    ticket = socket.assigns.selected_ticket
 
-    {:ok, _} = Tickets.create_comment(%{
-      ticket_id: socket.assigns.selected_ticket.id,
+    {:ok, comment} = Tickets.create_comment(%{
+      ticket_id: ticket.id,
       user_id: user.id,
       body: body
     })
 
-    comments = Tickets.list_comments(socket.assigns.selected_ticket.id)
+    PubSubBroadcast.broadcast_comment_added(ticket, comment)
+    comments = Tickets.list_comments(ticket.id)
     {:noreply, assign(socket, comments: comments, comment_body: "")}
   end
 

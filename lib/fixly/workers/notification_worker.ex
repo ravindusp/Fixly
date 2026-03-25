@@ -41,6 +41,26 @@ defmodule Fixly.Workers.NotificationWorker do
     :ok
   end
 
+  def perform(%Oban.Job{args: %{"type" => "sla_warning", "ticket_id" => ticket_id, "user_id" => user_id, "threshold" => threshold}}) do
+    ticket = Tickets.get_ticket!(ticket_id)
+    user = Accounts.get_user!(user_id)
+    Notifications.notify_sla_warning(ticket, user, threshold)
+    :ok
+  end
+
+  def perform(%Oban.Job{args: %{"type" => "sla_breach", "ticket_id" => ticket_id}}) do
+    ticket = Tickets.get_ticket!(ticket_id)
+    Notifications.notify_sla_breach(ticket)
+    :ok
+  end
+
+  def perform(%Oban.Job{args: %{"type" => "sla_critical", "ticket_id" => ticket_id, "org_id" => org_id}}) do
+    ticket = Tickets.get_ticket!(ticket_id)
+    org = Organizations.get_organization!(org_id)
+    Notifications.notify_sla_critical(ticket, org)
+    :ok
+  end
+
   # --- Convenience functions to enqueue jobs ---
 
   def enqueue_new_ticket(ticket_id) do
@@ -69,6 +89,24 @@ defmodule Fixly.Workers.NotificationWorker do
 
   def enqueue_resolved(ticket_id) do
     %{"type" => "resolved", "ticket_id" => ticket_id}
+    |> __MODULE__.new()
+    |> Oban.insert()
+  end
+
+  def enqueue_sla_warning(ticket_id, user_id, threshold) do
+    %{"type" => "sla_warning", "ticket_id" => ticket_id, "user_id" => user_id, "threshold" => threshold}
+    |> __MODULE__.new()
+    |> Oban.insert()
+  end
+
+  def enqueue_sla_breach(ticket_id) do
+    %{"type" => "sla_breach", "ticket_id" => ticket_id}
+    |> __MODULE__.new()
+    |> Oban.insert()
+  end
+
+  def enqueue_sla_critical(ticket_id, org_id) do
+    %{"type" => "sla_critical", "ticket_id" => ticket_id, "org_id" => org_id}
     |> __MODULE__.new()
     |> Oban.insert()
   end

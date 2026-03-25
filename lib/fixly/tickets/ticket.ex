@@ -38,6 +38,7 @@ defmodule Fixly.Tickets.Ticket do
 
     has_many :attachments, Fixly.Tickets.TicketAttachment
     has_many :comments, Fixly.Tickets.TicketComment
+    has_many :sla_escalations, Fixly.Tickets.SLAEscalation
 
     timestamps(type: :utc_datetime)
   end
