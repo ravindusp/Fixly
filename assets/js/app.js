@@ -26,10 +26,12 @@ import {hooks as colocatedHooks} from "phoenix-colocated/fixly"
 import topbar from "../vendor/topbar"
 
 import { SLATimer } from "./hooks/sla_timer"
+import { KanbanDrop } from "./hooks/kanban_drop"
 
 const Hooks = {
   ...colocatedHooks,
   SLATimer,
+  KanbanDrop,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

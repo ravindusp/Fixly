@@ -33,6 +33,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:view_mode, "list")
       |> assign(:filter_status, "all")
       |> assign(:filter_priority, "all")
+      |> assign(:search_query, "")
       |> assign(:selected_ticket, nil)
       |> assign(:comments, [])
       |> assign(:comment_body, "")
@@ -136,10 +137,21 @@ defmodule FixlyWeb.Admin.TicketListLive do
                 </ul>
               </div>
             </div>
-            <div class="relative hidden sm:block">
+            <form phx-change="search" phx-submit="search" class="relative hidden sm:block">
               <.icon name="hero-magnifying-glass" class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
-              <input type="text" placeholder="Search tickets..." class="input input-sm input-bordered pl-9 w-56" />
-            </div>
+              <input
+                type="text"
+                name="query"
+                value={@search_query}
+                placeholder="Search tickets..."
+                class="input input-sm input-bordered pl-9 w-56"
+                phx-debounce="300"
+                autocomplete="off"
+              />
+              <button :if={@search_query != ""} type="button" phx-click="clear_search" class="absolute right-2 top-1/2 -translate-y-1/2 text-base-content/40 hover:text-base-content">
+                <.icon name="hero-x-mark" class="size-3.5" />
+              </button>
+            </form>
           </div>
 
           <!-- List view -->
@@ -523,13 +535,18 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp kanban_column(assigns) do
     ~H"""
-    <div class="flex-shrink-0 w-72">
+    <div
+      class="flex-shrink-0 w-72"
+      id={"kanban-col-#{@status}"}
+      phx-hook="KanbanDrop"
+      data-status={@status}
+    >
       <div class="flex items-center gap-2 mb-3">
         <div class={["w-2 h-2 rounded-full", status_dot_color(@status)]}></div>
         <span class="text-sm font-semibold text-base-content">{status_label(@status)}</span>
         <span class="badge badge-sm badge-ghost">{length(@tickets)}</span>
       </div>
-      <div class="space-y-2.5">
+      <div class="space-y-2.5 min-h-[60px] kanban-dropzone rounded-lg transition-colors">
         <.kanban_card :for={ticket <- @tickets} ticket={ticket} selected={@selected_id == ticket.id} />
       </div>
     </div>
@@ -544,8 +561,10 @@ defmodule FixlyWeb.Admin.TicketListLive do
     <div
       phx-click="select_ticket"
       phx-value-id={@ticket.id}
+      draggable="true"
+      data-ticket-id={@ticket.id}
       class={[
-        "rounded-lg border p-3.5 shadow-sm cursor-pointer transition-all",
+        "rounded-lg border p-3.5 shadow-sm cursor-grab active:cursor-grabbing transition-all kanban-card",
         @selected && "border-primary bg-primary/5 shadow-md ring-1 ring-primary/20",
         !@selected && "border-base-300 bg-base-100 hover:shadow-md"
       ]}
@@ -631,6 +650,51 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   def handle_event("close_panel", _, socket) do
     {:noreply, assign(socket, selected_ticket: nil, comments: [])}
+  end
+
+  # --- Search ---
+
+  def handle_event("search", %{"query" => query}, socket) do
+    filtered = filter_tickets_by_search(socket.assigns.tickets, query)
+
+    {:noreply,
+     socket
+     |> assign(search_query: query, grouped: group_by_status(filtered))}
+  end
+
+  def handle_event("clear_search", _, socket) do
+    {:noreply,
+     socket
+     |> assign(search_query: "", grouped: group_by_status(socket.assigns.tickets))}
+  end
+
+  # --- Kanban Drag & Drop ---
+
+  def handle_event("kanban_drop", %{"ticket_id" => ticket_id, "new_status" => new_status}, socket) do
+    ticket = Tickets.get_ticket!(ticket_id)
+
+    # Handle SLA pause/resume on status change
+    case new_status do
+      "on_hold" -> Tickets.pause_sla(ticket)
+      "in_progress" when ticket.status == "on_hold" -> Tickets.resume_sla(ticket)
+      _ -> :ok
+    end
+
+    {:ok, _} = Tickets.update_ticket(ticket, %{status: new_status})
+    Tickets.log_activity(ticket.id, "status_change", "Status changed to #{status_label(new_status)}", %{from: ticket.status, to: new_status})
+
+    updated = Tickets.get_ticket!(ticket.id)
+    PubSubBroadcast.broadcast_ticket_updated(updated)
+
+    # Refresh selected ticket if it's the one we moved
+    socket =
+      if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket_id do
+        assign(socket, :selected_ticket, updated)
+      else
+        socket
+      end
+
+    {:noreply, reload_tickets(socket)}
   end
 
   def handle_event("set_view_mode", %{"mode" => mode}, socket) do
@@ -770,6 +834,20 @@ defmodule FixlyWeb.Admin.TicketListLive do
     order = ["created", "triaged", "assigned", "in_progress", "on_hold", "completed", "reviewed", "closed"]
     grouped = Enum.group_by(tickets, & &1.status)
     order |> Enum.map(fn s -> {s, Map.get(grouped, s, [])} end) |> Enum.reject(fn {_, t} -> t == [] end)
+  end
+
+  defp filter_tickets_by_search(tickets, ""), do: tickets
+  defp filter_tickets_by_search(tickets, query) do
+    q = String.downcase(query)
+
+    Enum.filter(tickets, fn t ->
+      String.contains?(String.downcase(t.description || ""), q) ||
+        String.contains?(String.downcase(t.reference_number || ""), q) ||
+        String.contains?(String.downcase(t.submitter_name || ""), q) ||
+        String.contains?(String.downcase(t.category || ""), q) ||
+        String.contains?(String.downcase(t.custom_item_name || ""), q) ||
+        (t.location && String.contains?(String.downcase(t.location.name || ""), q))
+    end)
   end
 
   defp status_actions("created"), do: [{"triaged", "Triage", "hero-clipboard-document-check"}, {"assigned", "Assign", "hero-user-plus"}]
