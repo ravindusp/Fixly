@@ -2,9 +2,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
   use FixlyWeb, :live_view
 
   alias Fixly.Assets
-  alias Fixly.Assets.Asset
   alias Fixly.Locations
-  alias Fixly.Tickets
 
   @categories ~w(hvac plumbing electrical structural appliance furniture it other)
   @statuses [
@@ -20,15 +18,12 @@ defmodule FixlyWeb.Admin.AssetsLive do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
 
-    assets = if org_id, do: Assets.list_assets(org_id), else: []
     locations = if org_id, do: Locations.get_tree(org_id) |> flatten_tree(), else: []
 
     socket =
       socket
       |> assign(:page_title, "Assets")
       |> assign(:org_id, org_id)
-      |> assign(:all_assets, assets)
-      |> assign(:assets, assets)
       |> assign(:locations, locations)
       |> assign(:search_query, "")
       |> assign(:filter_categories, MapSet.new())
@@ -44,6 +39,9 @@ defmodule FixlyWeb.Admin.AssetsLive do
       |> assign(:selected_asset, nil)
       |> assign(:show_add_form, false)
       |> assign(:add_form, %{name: "", category: "", location_id: ""})
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> reload_data()
 
     {:ok, socket}
   end
@@ -54,10 +52,10 @@ defmodule FixlyWeb.Admin.AssetsLive do
     <div class="space-y-6">
       <!-- Stats -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <.stat_card label="Total Assets" value={length(@all_assets)} icon="hero-cube" color="primary" />
-        <.stat_card label="Operational" value={Enum.count(@all_assets, &(&1.status == "operational"))} icon="hero-check-circle" color="success" />
-        <.stat_card label="Needs Repair" value={Enum.count(@all_assets, &(&1.status == "needs_repair"))} icon="hero-wrench" color="warning" />
-        <.stat_card label="AI Discovered" value={Enum.count(@all_assets, &(&1.created_via in ["ai_suggested", "ai_auto"]))} icon="hero-sparkles" color="info" />
+        <.stat_card label="Total Assets" value={@stat_total} icon="hero-cube" color="primary" />
+        <.stat_card label="Operational" value={@stat_operational} icon="hero-check-circle" color="success" />
+        <.stat_card label="Needs Repair" value={@stat_needs_repair} icon="hero-wrench" color="warning" />
+        <.stat_card label="AI Discovered" value={@stat_ai_discovered} icon="hero-sparkles" color="info" />
       </div>
 
       <div class="flex gap-6">
@@ -256,22 +254,15 @@ defmodule FixlyWeb.Admin.AssetsLive do
             </div>
 
             <!-- Asset table -->
-            <%= if @assets == [] do %>
-              <div class="flex flex-col items-center justify-center py-16 text-center">
-                <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
-                  <.icon name="hero-cube" class="size-6 text-base-content/30" />
-                </div>
-                <h3 class="text-base font-semibold text-base-content mb-1">No assets found</h3>
-                <p class="text-sm text-base-content/50">Assets are created when AI analyzes tickets, or you can add them manually.</p>
-              </div>
-            <% else %>
-              <!-- Header -->
-              <div class="grid grid-cols-[2fr_1fr_1.5fr_1fr_1fr_0.5fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
-                <span>Asset</span><span>Category</span><span>Location</span><span>Status</span><span>Tickets</span><span></span>
-              </div>
-              <!-- Rows -->
+            <!-- Header -->
+            <div class="grid grid-cols-[2fr_1fr_1.5fr_1fr_1fr_0.5fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+              <span>Asset</span><span>Category</span><span>Location</span><span>Status</span><span>Tickets</span><span></span>
+            </div>
+            <!-- Rows (streamed) -->
+            <div id="assets-stream" phx-update="stream">
               <div
-                :for={asset <- @assets}
+                :for={{dom_id, asset} <- @streams.assets}
+                id={dom_id}
                 phx-click="select_asset"
                 phx-value-id={asset.id}
                 class={[
@@ -295,7 +286,25 @@ defmodule FixlyWeb.Admin.AssetsLive do
                 <div class="text-sm text-base-content/60">{asset.ticket_count}</div>
                 <div></div>
               </div>
-            <% end %>
+            </div>
+            <!-- Empty state -->
+            <div :if={@stat_total == 0} class="flex flex-col items-center justify-center py-16 text-center">
+              <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
+                <.icon name="hero-cube" class="size-6 text-base-content/30" />
+              </div>
+              <h3 class="text-base font-semibold text-base-content mb-1">No assets found</h3>
+              <p class="text-sm text-base-content/50">Assets are created when AI analyzes tickets, or you can add them manually.</p>
+            </div>
+            <!-- Infinite scroll sentinel -->
+            <div
+              :if={@has_more}
+              id="assets-infinite-scroll"
+              phx-hook="InfiniteScroll"
+              data-has-more={to_string(@has_more)}
+              class="flex justify-center py-4"
+            >
+              <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+            </div>
           </div>
         </div>
 
@@ -401,8 +410,23 @@ defmodule FixlyWeb.Admin.AssetsLive do
   # --- Events ---
 
   @impl true
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more && socket.assigns.cursor do
+      filters = build_asset_filters(socket.assigns)
+      page = Assets.list_assets_paginated(socket.assigns.org_id, filters, socket.assigns.cursor)
+
+      {:noreply,
+       socket
+       |> assign(:cursor, page.cursor)
+       |> assign(:has_more, page.has_more)
+       |> stream(:assets, page.entries)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("search", %{"query" => query}, socket) do
-    {:noreply, socket |> assign(:search_query, query) |> apply_filters()}
+    {:noreply, socket |> assign(:search_query, query) |> reload_data()}
   end
 
   # Category filter events
@@ -430,7 +454,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
         MapSet.put(socket.assigns.filter_categories, cat)
       end
 
-    {:noreply, socket |> assign(:filter_categories, updated) |> apply_filters()}
+    {:noreply, socket |> assign(:filter_categories, updated) |> reload_data()}
   end
 
   def handle_event("clear_category_filter", _, socket) do
@@ -438,7 +462,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
      socket
      |> assign(:filter_categories, MapSet.new())
      |> assign(:category_filter_search, "")
-     |> apply_filters()}
+     |> reload_data()}
   end
 
   # Location filter events
@@ -466,7 +490,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
         MapSet.put(socket.assigns.filter_location_ids, id)
       end
 
-    {:noreply, socket |> assign(:filter_location_ids, updated) |> apply_filters()}
+    {:noreply, socket |> assign(:filter_location_ids, updated) |> reload_data()}
   end
 
   def handle_event("clear_location_filter", _, socket) do
@@ -474,7 +498,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
      socket
      |> assign(:filter_location_ids, MapSet.new())
      |> assign(:location_filter_search, "")
-     |> apply_filters()}
+     |> reload_data()}
   end
 
   # Status filter events
@@ -502,7 +526,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
         MapSet.put(socket.assigns.filter_statuses, val)
       end
 
-    {:noreply, socket |> assign(:filter_statuses, updated) |> apply_filters()}
+    {:noreply, socket |> assign(:filter_statuses, updated) |> reload_data()}
   end
 
   def handle_event("clear_status_filter", _, socket) do
@@ -510,7 +534,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
      socket
      |> assign(:filter_statuses, MapSet.new())
      |> assign(:status_filter_search, "")
-     |> apply_filters()}
+     |> reload_data()}
   end
 
   # Clear all filters
@@ -526,7 +550,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
        location_filter_search: "",
        status_filter_search: ""
      )
-     |> apply_filters()}
+     |> reload_data()}
   end
 
   def handle_event("toggle_add_form", _, socket) do
@@ -544,7 +568,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
 
     case Assets.create_asset(attrs) do
       {:ok, asset} ->
-        {:noreply, socket |> assign(show_add_form: false) |> reload_assets() |> put_flash(:info, "Asset \"#{asset.name}\" created")}
+        {:noreply, socket |> assign(show_add_form: false) |> reload_data() |> put_flash(:info, "Asset \"#{asset.name}\" created")}
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create asset")}
     end
@@ -564,53 +588,56 @@ defmodule FixlyWeb.Admin.AssetsLive do
   def handle_event("update_asset_status", %{"status" => status}, socket) do
     {:ok, asset} = Assets.update_asset(socket.assigns.selected_asset, %{status: status})
     asset = Assets.get_asset!(asset.id)
-    {:noreply, socket |> assign(:selected_asset, asset) |> reload_assets()}
+    {:noreply, socket |> assign(:selected_asset, asset) |> reload_data()}
   end
 
   def handle_event("delete_asset", %{"id" => id}, socket) do
     asset = Assets.get_asset!(id)
     {:ok, _} = Assets.delete_asset(asset)
-    {:noreply, socket |> assign(:selected_asset, nil) |> reload_assets() |> put_flash(:info, "Asset deleted")}
+    {:noreply, socket |> assign(:selected_asset, nil) |> reload_data() |> put_flash(:info, "Asset deleted")}
   end
 
   # --- Helpers ---
 
-  defp reload_assets(socket) do
-    assets = Assets.list_assets(socket.assigns.org_id)
-    socket |> assign(:all_assets, assets) |> apply_filters()
+  defp reload_data(socket) do
+    org_id = socket.assigns.org_id
+
+    if org_id do
+      filters = build_asset_filters(socket.assigns)
+      page = Assets.list_assets_paginated(org_id, filters)
+
+      # Stat cards from DB
+      status_counts = Assets.count_assets_by_status(org_id, filters)
+      total = status_counts |> Map.values() |> Enum.sum()
+      ai_discovered = Assets.count_assets_by_created_via(org_id)
+
+      socket
+      |> assign(:stat_total, total)
+      |> assign(:stat_operational, Map.get(status_counts, "operational", 0))
+      |> assign(:stat_needs_repair, Map.get(status_counts, "needs_repair", 0))
+      |> assign(:stat_ai_discovered, ai_discovered)
+      |> assign(:cursor, page.cursor)
+      |> assign(:has_more, page.has_more)
+      |> stream(:assets, page.entries, reset: true)
+    else
+      socket
+      |> assign(:stat_total, 0)
+      |> assign(:stat_operational, 0)
+      |> assign(:stat_needs_repair, 0)
+      |> assign(:stat_ai_discovered, 0)
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> stream(:assets, [], reset: true)
+    end
   end
 
-  defp apply_filters(socket) do
-    filtered =
-      socket.assigns.all_assets
-      |> filter_by_search(socket.assigns.search_query)
-      |> filter_by_categories(socket.assigns.filter_categories)
-      |> filter_by_location_ids(socket.assigns.filter_location_ids)
-      |> filter_by_statuses(socket.assigns.filter_statuses)
-
-    assign(socket, :assets, filtered)
-  end
-
-  defp filter_by_search(assets, ""), do: assets
-  defp filter_by_search(assets, q) do
-    q = String.downcase(q)
-    Enum.filter(assets, fn a ->
-      String.contains?(String.downcase(a.name || ""), q) ||
-        String.contains?(String.downcase(a.category || ""), q) ||
-        (a.location && String.contains?(String.downcase(a.location.name || ""), q))
-    end)
-  end
-
-  defp filter_by_categories(assets, %MapSet{} = cats) do
-    if MapSet.size(cats) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(cats, &1.category))
-  end
-
-  defp filter_by_location_ids(assets, %MapSet{} = ids) do
-    if MapSet.size(ids) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(ids, &1.location_id))
-  end
-
-  defp filter_by_statuses(assets, %MapSet{} = statuses) do
-    if MapSet.size(statuses) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(statuses, &1.status))
+  defp build_asset_filters(assigns) do
+    filters = %{}
+    filters = if MapSet.size(assigns.filter_categories) > 0, do: Map.put(filters, :categories, assigns.filter_categories), else: filters
+    filters = if MapSet.size(assigns.filter_location_ids) > 0, do: Map.put(filters, :location_ids, assigns.filter_location_ids), else: filters
+    filters = if MapSet.size(assigns.filter_statuses) > 0, do: Map.put(filters, :statuses, assigns.filter_statuses), else: filters
+    filters = if assigns.search_query != "", do: Map.put(filters, :search, assigns.search_query), else: filters
+    filters
   end
 
   # Filtered option lists for combobox search

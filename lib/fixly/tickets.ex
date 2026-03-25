@@ -7,6 +7,85 @@ defmodule Fixly.Tickets do
 
   # --- Tickets ---
 
+  @doc "Recent tickets for dashboard widget."
+  def list_recent_tickets(org_id, limit \\ 5) do
+    Ticket
+    |> where([t], t.organization_id == ^org_id)
+    |> order_by([t], desc: t.inserted_at)
+    |> limit(^limit)
+    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> Repo.all()
+  end
+
+  @doc "Overdue tickets for dashboard widget."
+  def list_overdue_tickets(org_id) do
+    Ticket
+    |> where([t], t.organization_id == ^org_id)
+    |> where([t], t.sla_breached == true)
+    |> where([t], t.status not in ["completed", "reviewed", "closed"])
+    |> order_by([t], asc: t.sla_deadline)
+    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> Repo.all()
+  end
+
+  @doc "Count tickets grouped by status for stat cards."
+  def count_tickets_by_status(org_id, filters \\ %{}) do
+    Ticket
+    |> where([t], t.organization_id == ^org_id)
+    |> apply_db_filters(filters)
+    |> group_by([t], t.status)
+    |> select([t], {t.status, count(t.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "Paginated ticket list with DB-level filtering."
+  def list_tickets_paginated(org_id, filters \\ %{}, cursor \\ nil) do
+    Ticket
+    |> where([t], t.organization_id == ^org_id)
+    |> apply_db_filters(filters)
+    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> Fixly.Pagination.paginate_desc(cursor: cursor)
+  end
+
+  @doc """
+  List tickets grouped by status with a per-status limit.
+  Returns `[{status, %{tickets: [...], total: n, has_more: bool}}, ...]`.
+  """
+  def list_tickets_by_status(org_id, filters \\ %{}, per_status_limit \\ 20) do
+    statuses = ~w(created triaged assigned in_progress on_hold completed reviewed closed)
+
+    # Get total counts per status in one query
+    total_counts = count_tickets_by_status(org_id, filters)
+
+    Enum.map(statuses, fn status ->
+      tickets =
+        Ticket
+        |> where([t], t.organization_id == ^org_id and t.status == ^status)
+        |> apply_db_filters(filters)
+        |> order_by([t], desc: t.inserted_at)
+        |> limit(^per_status_limit)
+        |> preload([:location, :assigned_to_user, :assigned_to_org])
+        |> Repo.all()
+
+      total = Map.get(total_counts, status, 0)
+
+      {status, %{tickets: tickets, total: total, has_more: total > per_status_limit}}
+    end)
+  end
+
+  @doc "Load more tickets for a specific status (offset-based for kanban/grouped list)."
+  def list_tickets_for_status(org_id, status, filters \\ %{}, offset \\ 0, limit \\ 20) do
+    Ticket
+    |> where([t], t.organization_id == ^org_id and t.status == ^status)
+    |> apply_db_filters(filters)
+    |> order_by([t], desc: t.inserted_at)
+    |> offset(^offset)
+    |> limit(^limit)
+    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> Repo.all()
+  end
+
   def get_ticket!(id) do
     Ticket
     |> Repo.get!(id)
@@ -281,17 +360,82 @@ defmodule Fixly.Tickets do
     |> maybe_filter_category(opts[:category])
   end
 
+  @doc false
+  def apply_db_filters(query, filters) when is_map(filters) do
+    query
+    |> maybe_filter_status(filters[:status] || filters["status"])
+    |> maybe_filter_priority(filters[:priority] || filters["priority"])
+    |> maybe_filter_location(filters[:location_id] || filters["location_id"])
+    |> maybe_filter_category(filters[:category] || filters["category"])
+    |> maybe_filter_date_from(filters[:date_from] || filters["date_from"])
+    |> maybe_filter_date_to(filters[:date_to] || filters["date_to"])
+    |> maybe_filter_assignees(filters[:assignee_ids] || filters["assignee_ids"])
+    |> maybe_filter_search(filters[:search] || filters["search"])
+  end
+
   defp maybe_filter_status(query, nil), do: query
+  defp maybe_filter_status(query, "all"), do: query
   defp maybe_filter_status(query, status), do: where(query, [t], t.status == ^status)
 
   defp maybe_filter_priority(query, nil), do: query
+  defp maybe_filter_priority(query, "all"), do: query
   defp maybe_filter_priority(query, priority), do: where(query, [t], t.priority == ^priority)
 
   defp maybe_filter_location(query, nil), do: query
+  defp maybe_filter_location(query, "all"), do: query
   defp maybe_filter_location(query, location_id), do: where(query, [t], t.location_id == ^location_id)
 
   defp maybe_filter_category(query, nil), do: query
+  defp maybe_filter_category(query, "all"), do: query
   defp maybe_filter_category(query, category), do: where(query, [t], t.category == ^category)
+
+  defp maybe_filter_date_from(query, nil), do: query
+  defp maybe_filter_date_from(query, date_str) when is_binary(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} ->
+        from = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+        where(query, [t], t.inserted_at >= ^from)
+      _ -> query
+    end
+  end
+  defp maybe_filter_date_from(query, _), do: query
+
+  defp maybe_filter_date_to(query, nil), do: query
+  defp maybe_filter_date_to(query, date_str) when is_binary(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} ->
+        to = DateTime.new!(date, ~T[23:59:59], "Etc/UTC")
+        where(query, [t], t.inserted_at <= ^to)
+      _ -> query
+    end
+  end
+  defp maybe_filter_date_to(query, _), do: query
+
+  defp maybe_filter_assignees(query, nil), do: query
+  defp maybe_filter_assignees(query, ids) when is_list(ids) and ids != [] do
+    where(query, [t], t.assigned_to_user_id in ^ids or t.assigned_to_org_id in ^ids)
+  end
+  defp maybe_filter_assignees(query, %MapSet{} = ids) do
+    if MapSet.size(ids) == 0, do: query, else: maybe_filter_assignees(query, MapSet.to_list(ids))
+  end
+  defp maybe_filter_assignees(query, _), do: query
+
+  defp maybe_filter_search(query, nil), do: query
+  defp maybe_filter_search(query, ""), do: query
+  defp maybe_filter_search(query, search) when is_binary(search) do
+    pattern = "%#{search}%"
+
+    query
+    |> join(:left, [t], l in assoc(t, :location), as: :search_location)
+    |> where(
+      [t, search_location: l],
+      ilike(t.description, ^pattern) or
+        ilike(t.reference_number, ^pattern) or
+        ilike(coalesce(t.submitter_name, ""), ^pattern) or
+        ilike(coalesce(t.category, ""), ^pattern) or
+        ilike(coalesce(l.name, ""), ^pattern)
+    )
+  end
 
   # Check all linked assets for a ticket and restore operational status if all tickets are resolved.
   defp check_linked_assets_for_ticket(ticket_id) do

@@ -15,13 +15,8 @@ defmodule FixlyWeb.Admin.DashboardLive do
       contractor_perf = Engine.contractor_performance(query)
       volume = Engine.group_by_period(query, :day)
 
-      all_tickets = Tickets.list_tickets(org_id)
-      recent_tickets = Enum.take(all_tickets, 5)
-
-      overdue_tickets =
-        Enum.filter(all_tickets, fn t ->
-          t.sla_breached == true and t.status not in ["completed", "reviewed", "closed"]
-        end)
+      recent_tickets = Tickets.list_recent_tickets(org_id, 5)
+      overdue_tickets = Tickets.list_overdue_tickets(org_id)
 
       socket =
         socket

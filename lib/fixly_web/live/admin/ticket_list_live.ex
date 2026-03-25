@@ -19,10 +19,6 @@ defmodule FixlyWeb.Admin.TicketListLive do
       PubSubBroadcast.subscribe_org(org_id)
     end
 
-    tickets = if org_id, do: Tickets.list_tickets(org_id), else: []
-    grouped = group_by_status(tickets)
-    counts = compute_counts(tickets)
-
     internal_users = if org_id, do: Accounts.list_users_by_organization(org_id), else: []
     contractor_orgs = if org_id, do: Organizations.list_contractor_orgs(org_id), else: []
 
@@ -31,19 +27,19 @@ defmodule FixlyWeb.Admin.TicketListLive do
       Enum.map(internal_users, fn u -> %{id: u.id, name: u.name || u.email, type: "user"} end) ++
       Enum.map(contractor_orgs, fn o -> %{id: o.id, name: o.name, type: "org"} end)
 
-    # Categories from existing tickets
-    categories = tickets |> Enum.map(& &1.category) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
-
-    # Locations from existing tickets
-    locations = tickets |> Enum.map(& &1.location) |> Enum.reject(&is_nil/1) |> Enum.uniq_by(& &1.id) |> Enum.sort_by(& &1.name)
+    # Static reference data for filter dropdowns
+    all_categories = Ticket.categories()
+    all_locations =
+      if org_id do
+        Fixly.Locations.get_tree(org_id)
+        |> flatten_location_tree()
+      else
+        []
+      end
 
     socket =
       socket
       |> assign(:page_title, "Tickets")
-      |> assign(:all_tickets, tickets)
-      |> assign(:tickets, tickets)
-      |> assign(:grouped, grouped)
-      |> assign(:counts, counts)
       |> assign(:view_mode, "list")
       |> assign(:search_query, "")
       # Filters
@@ -60,8 +56,14 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:assignee_search, "")
       # Reference data
       |> assign(:all_assignees, all_assignees)
-      |> assign(:all_categories, categories)
-      |> assign(:all_locations, locations)
+      |> assign(:all_categories, all_categories)
+      |> assign(:all_locations, all_locations)
+      # Pagination state
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      # Kanban data (assign-based, not streamed)
+      |> assign(:grouped, [])
+      |> assign(:kanban_loading, MapSet.new())
       # Panel
       |> assign(:selected_ticket, nil)
       |> assign(:comments, [])
@@ -73,26 +75,31 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:internal_users, internal_users)
       |> assign(:contractor_orgs, contractor_orgs)
       |> assign(:current_user, user)
+      |> reload_data()
 
     {:ok, socket}
+  end
+
+  defp flatten_location_tree(nodes, acc \\ []) do
+    Enum.reduce(nodes, acc, fn node, acc ->
+      acc ++ [node] ++ flatten_location_tree(node.children)
+    end)
   end
 
   # --- PubSub Handlers (real-time updates from other users/workers) ---
 
   @impl true
-  def handle_info({:ticket_created, _ticket}, socket) do
-    {:noreply, reload_tickets(socket)}
-  end
+  def handle_info({:ticket_created, ticket}, socket) do
+    # Preload if needed, then insert into stream if it matches current filters
+    ticket = Tickets.get_ticket!(ticket.id)
 
-  def handle_info({:ticket_updated, ticket}, socket) do
-    socket = reload_tickets(socket)
-
-    # If the updated ticket is the one we have open in the panel, refresh it
     socket =
-      if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket.id do
-        updated = Tickets.get_ticket!(ticket.id)
-        comments = Tickets.list_comments(ticket.id)
-        assign(socket, selected_ticket: updated, comments: comments)
+      if matches_filters?(ticket, socket.assigns) do
+        counts = reload_counts(socket)
+        socket
+        |> assign(:counts, counts)
+        |> stream_insert(:tickets, ticket, at: 0)
+        |> maybe_reload_kanban()
       else
         socket
       end
@@ -100,8 +107,33 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, socket}
   end
 
-  def handle_info({:sla_breached, _ticket}, socket) do
-    {:noreply, reload_tickets(socket)}
+  def handle_info({:ticket_updated, ticket}, socket) do
+    ticket = Tickets.get_ticket!(ticket.id)
+
+    # Update stream + kanban
+    counts = reload_counts(socket)
+    socket =
+      socket
+      |> assign(:counts, counts)
+      |> stream_insert(:tickets, ticket)
+      |> maybe_reload_kanban()
+
+    # If the updated ticket is the one we have open in the panel, refresh it
+    socket =
+      if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket.id do
+        comments = Tickets.list_comments(ticket.id)
+        assign(socket, selected_ticket: ticket, comments: comments)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:sla_breached, ticket}, socket) do
+    ticket = Tickets.get_ticket!(ticket.id)
+    counts = reload_counts(socket)
+    {:noreply, socket |> assign(:counts, counts) |> stream_insert(:tickets, ticket) |> maybe_reload_kanban()}
   end
 
   def handle_info({:comment_added, _comment}, socket) do
@@ -399,21 +431,40 @@ defmodule FixlyWeb.Admin.TicketListLive do
             </div>
           </div>
 
-          <!-- List view -->
+          <!-- List view (flat, streamed) -->
           <div :if={@view_mode == "list"}>
-            <%= if @tickets == [] do %>
+            <div class="grid grid-cols-[3fr_1fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+              <span>Ticket</span><span>Status</span><span>Location</span><span>Category</span><span>Priority</span><span>Assigned To</span><span>Date</span>
+            </div>
+            <div id="tickets-stream" phx-update="stream">
+              <.ticket_row_flat
+                :for={{dom_id, ticket} <- @streams.tickets}
+                id={dom_id}
+                ticket={ticket}
+                selected={@selected_ticket && @selected_ticket.id == ticket.id}
+              />
+            </div>
+            <div :if={@counts.total == 0}>
               <.empty_state />
-            <% else %>
-              <.ticket_table_grouped grouped={@grouped} selected_id={@selected_ticket && @selected_ticket.id} />
-            <% end %>
+            </div>
+            <!-- Infinite scroll sentinel -->
+            <div
+              :if={@has_more}
+              id="tickets-infinite-scroll"
+              phx-hook="InfiniteScroll"
+              data-has-more={to_string(@has_more)}
+              class="flex justify-center py-4"
+            >
+              <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+            </div>
           </div>
 
-          <!-- Kanban view -->
+          <!-- Kanban view (assign-based, limited per column) -->
           <div :if={@view_mode == "kanban"} class="p-5 flex-1">
-            <%= if @tickets == [] do %>
+            <%= if @grouped == [] || Enum.all?(@grouped, fn {_, g} -> g.total == 0 end) do %>
               <.empty_state />
             <% else %>
-              <.kanban_board grouped={@grouped} selected_id={@selected_ticket && @selected_ticket.id} />
+              <.kanban_board grouped={@grouped} kanban_loading={@kanban_loading} selected_id={@selected_ticket && @selected_ticket.id} />
             <% end %>
           </div>
         </div>
@@ -827,56 +878,21 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   # ==========================================
-  # GROUPED TABLE
+  # FLAT TABLE ROW (for streamed list view)
   # ==========================================
 
-  attr :grouped, :list, required: true
-  attr :selected_id, :string, default: nil
-
-  defp ticket_table_grouped(assigns) do
-    ~H"""
-    <div>
-      <.ticket_group
-        :for={{status, tickets} <- @grouped}
-        :if={tickets != []}
-        status={status}
-        tickets={tickets}
-        selected_id={@selected_id}
-      />
-    </div>
-    """
-  end
-
-  attr :status, :string, required: true
-  attr :tickets, :list, required: true
-  attr :selected_id, :string, default: nil
-
-  defp ticket_group(assigns) do
-    ~H"""
-    <div>
-      <div class="flex items-center gap-2 px-5 py-2.5 bg-base-200/50 border-b border-base-300">
-        <div class={["w-1 h-4 rounded-full", status_bar_color(@status)]}></div>
-        <span class="text-sm font-semibold text-base-content">{status_label(@status)}</span>
-        <span class="badge badge-sm badge-ghost">{length(@tickets)}</span>
-      </div>
-      <div class="grid grid-cols-[3fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
-        <span>Ticket</span><span>Location</span><span>Category</span><span>Priority</span><span>Assigned To</span><span>Date</span>
-      </div>
-      <.ticket_row :for={ticket <- @tickets} ticket={ticket} selected={@selected_id == ticket.id} />
-    </div>
-    """
-  end
-
+  attr :id, :string, required: true
   attr :ticket, Ticket, required: true
   attr :selected, :boolean, default: false
 
-  defp ticket_row(assigns) do
+  defp ticket_row_flat(assigns) do
     ~H"""
     <div
+      id={@id}
       phx-click="select_ticket"
       phx-value-id={@ticket.id}
       class={[
-        "grid grid-cols-[3fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center cursor-pointer transition-colors",
+        "grid grid-cols-[3fr_1fr_2fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center cursor-pointer transition-colors",
         @selected && "bg-primary/5 border-l-2 border-l-primary",
         !@selected && "hover:bg-base-200/30"
       ]}
@@ -888,6 +904,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
           <span :if={@ticket.submitter_name}> · {@ticket.submitter_name}</span>
         </p>
       </div>
+      <div><.status_badge status={@ticket.status} /></div>
       <div class="min-w-0">
         <p :if={@ticket.location} class="text-sm text-base-content/70 truncate">{@ticket.location.name}</p>
         <p :if={!@ticket.location} class="text-sm text-base-content/30">—</p>
@@ -912,21 +929,35 @@ defmodule FixlyWeb.Admin.TicketListLive do
   # ==========================================
 
   attr :grouped, :list, required: true
+  attr :kanban_loading, :any, required: true
   attr :selected_id, :string, default: nil
 
   defp kanban_board(assigns) do
     ~H"""
     <div class="flex gap-4 overflow-x-auto pb-4 items-stretch min-h-[400px]">
-      <.kanban_column :for={{status, tickets} <- @grouped} status={status} tickets={tickets} selected_id={@selected_id} />
+      <.kanban_column
+        :for={{status, group_data} <- @grouped}
+        status={status}
+        tickets={group_data.tickets}
+        total={group_data.total}
+        has_more={group_data.has_more}
+        loading={MapSet.member?(@kanban_loading, status)}
+        selected_id={@selected_id}
+      />
     </div>
     """
   end
 
   attr :status, :string, required: true
   attr :tickets, :list, required: true
+  attr :total, :integer, required: true
+  attr :has_more, :boolean, required: true
+  attr :loading, :boolean, default: false
   attr :selected_id, :string, default: nil
 
   defp kanban_column(assigns) do
+    assigns = assign(assigns, :indexed_tickets, Enum.with_index(assigns.tickets, 1))
+
     ~H"""
     <div
       class="flex-shrink-0 w-72 flex flex-col"
@@ -937,16 +968,32 @@ defmodule FixlyWeb.Admin.TicketListLive do
       <div class="flex items-center gap-2 mb-3">
         <div class={["w-2 h-2 rounded-full", status_dot_color(@status)]}></div>
         <span class="text-sm font-semibold text-base-content">{status_label(@status)}</span>
-        <span class="badge badge-sm badge-ghost">{length(@tickets)}</span>
+        <span class="badge badge-sm badge-ghost">{@total}</span>
       </div>
-      <div class="space-y-2.5 flex-1 min-h-[200px] kanban-dropzone rounded-lg transition-colors p-1">
-        <.kanban_card :for={ticket <- @tickets} ticket={ticket} selected={@selected_id == ticket.id} />
+      <div class="space-y-2.5 flex-1 min-h-[200px] max-h-[calc(100vh-16rem)] overflow-y-auto kanban-dropzone rounded-lg transition-colors p-1" id={"kanban-scroll-#{@status}"}>
+        <.kanban_card :for={{ticket, idx} <- @indexed_tickets} ticket={ticket} index={idx} selected={@selected_id == ticket.id} />
+        <!-- Loading spinner -->
+        <div :if={@loading} class="flex justify-center py-3">
+          <span class="loading loading-spinner loading-sm text-primary"></span>
+        </div>
+        <!-- Infinite scroll sentinel (auto-loads when visible) -->
+        <div
+          :if={@has_more && !@loading}
+          id={"kanban-sentinel-#{@status}"}
+          phx-hook="InfiniteScroll"
+          data-has-more={to_string(@has_more)}
+          data-event="load_more_in_group"
+          data-param-status={@status}
+          data-scroll-root=".kanban-dropzone"
+          class="h-1"
+        />
       </div>
     </div>
     """
   end
 
   attr :ticket, Ticket, required: true
+  attr :index, :integer, required: true
   attr :selected, :boolean, default: false
 
   defp kanban_card(assigns) do
@@ -963,9 +1010,12 @@ defmodule FixlyWeb.Admin.TicketListLive do
       ]}
     >
       <div class="flex items-start justify-between gap-2 mb-2">
-        <div class="flex flex-wrap gap-1.5">
-          <.priority_badge :if={@ticket.priority} priority={@ticket.priority} />
-          <span :if={@ticket.category} class="badge badge-sm badge-ghost">{@ticket.category}</span>
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] font-mono text-base-content/25 w-5 shrink-0">{@index}</span>
+          <div class="flex flex-wrap gap-1.5">
+            <.priority_badge :if={@ticket.priority} priority={@ticket.priority} />
+            <span :if={@ticket.category} class="badge badge-sm badge-ghost">{@ticket.category}</span>
+          </div>
         </div>
         <span class="text-xs text-base-content/40 font-mono shrink-0">{@ticket.reference_number}</span>
       </div>
@@ -1062,20 +1112,69 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [])}
   end
 
+  # --- Load more (per-group pagination for kanban) ---
+
+  def handle_event("load_more_in_group", %{"status" => status}, socket) do
+    grouped = socket.assigns.grouped
+
+    # Prevent duplicate loads if already loading
+    if MapSet.member?(socket.assigns.kanban_loading, status) do
+      {:noreply, socket}
+    else
+      case Enum.find(grouped, fn {s, _} -> s == status end) do
+        {^status, group_data} when group_data.has_more ->
+          # Show loading state
+          socket = assign(socket, :kanban_loading, MapSet.put(socket.assigns.kanban_loading, status))
+
+          current_count = length(group_data.tickets)
+          filters = build_filters(socket.assigns)
+          more_tickets = Tickets.list_tickets_for_status(socket.assigns.org_id, status, filters, current_count, 20)
+
+          updated_tickets = group_data.tickets ++ more_tickets
+          new_has_more = length(updated_tickets) < group_data.total
+
+          updated_grouped =
+            Enum.map(grouped, fn
+              {^status, gd} -> {status, %{gd | tickets: updated_tickets, has_more: new_has_more}}
+              other -> other
+            end)
+
+          {:noreply,
+           socket
+           |> assign(:grouped, updated_grouped)
+           |> assign(:kanban_loading, MapSet.delete(socket.assigns.kanban_loading, status))}
+
+        _ ->
+          {:noreply, socket}
+      end
+    end
+  end
+
+  # --- Infinite scroll (kept for assets, unused by tickets now) ---
+
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more && socket.assigns.cursor do
+      filters = build_filters(socket.assigns)
+      page = Tickets.list_tickets_paginated(socket.assigns.org_id, filters, socket.assigns.cursor)
+
+      {:noreply,
+       socket
+       |> assign(:cursor, page.cursor)
+       |> assign(:has_more, page.has_more)
+       |> stream(:tickets, page.entries)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # --- Search ---
 
   def handle_event("search", %{"query" => query}, socket) do
-    filtered = filter_tickets_by_search(socket.assigns.tickets, query)
-
-    {:noreply,
-     socket
-     |> assign(search_query: query, grouped: group_by_status(filtered))}
+    {:noreply, socket |> assign(:search_query, query) |> reload_data()}
   end
 
   def handle_event("clear_search", _, socket) do
-    {:noreply,
-     socket
-     |> assign(search_query: "", grouped: group_by_status(socket.assigns.tickets))}
+    {:noreply, socket |> assign(:search_query, "") |> reload_data()}
   end
 
   # --- Kanban Drag & Drop ---
@@ -1105,11 +1204,11 @@ defmodule FixlyWeb.Admin.TicketListLive do
         socket
       end
 
-    {:noreply, reload_tickets(socket)}
+    {:noreply, reload_data(socket)}
   end
 
   def handle_event("set_view_mode", %{"mode" => mode}, socket) do
-    {:noreply, assign(socket, :view_mode, mode)}
+    {:noreply, socket |> assign(:view_mode, mode) |> reload_data()}
   end
 
   def handle_event("toggle_filters", _, socket) do
@@ -1117,19 +1216,19 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   def handle_event("set_filter_status", %{"status" => status}, socket) do
-    {:noreply, socket |> assign(:filter_status, status) |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_status, status) |> reload_data()}
   end
 
   def handle_event("set_filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, socket |> assign(:filter_priority, priority) |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_priority, priority) |> reload_data()}
   end
 
   def handle_event("set_filter_category", %{"category" => category}, socket) do
-    {:noreply, socket |> assign(:filter_category, category) |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_category, category) |> reload_data()}
   end
 
   def handle_event("set_filter_location", %{"location_id" => location_id}, socket) do
-    {:noreply, socket |> assign(:filter_location_id, location_id) |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_location_id, location_id) |> reload_data()}
   end
 
   # --- Date Range Picker ---
@@ -1175,7 +1274,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
           {date_s, nil}
       end
 
-    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to) |> apply_all_filters()}
+    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to) |> reload_data()}
   end
 
   def handle_event("date_preset", %{"preset" => preset}, socket) do
@@ -1194,11 +1293,11 @@ defmodule FixlyWeb.Admin.TicketListLive do
         _ -> {nil, nil}
       end
 
-    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to, show_date_picker: false) |> apply_all_filters()}
+    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to, show_date_picker: false) |> reload_data()}
   end
 
   def handle_event("clear_date_range", _, socket) do
-    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> apply_all_filters()}
+    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> reload_data()}
   end
 
   def handle_event("assignee_search", %{"query" => query}, socket) do
@@ -1207,32 +1306,32 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   def handle_event("add_assignee", %{"id" => id}, socket) do
     ids = MapSet.put(socket.assigns.filter_assignee_ids, id)
-    {:noreply, socket |> assign(filter_assignee_ids: ids, assignee_search: "") |> apply_all_filters()}
+    {:noreply, socket |> assign(filter_assignee_ids: ids, assignee_search: "") |> reload_data()}
   end
 
   def handle_event("remove_assignee", %{"id" => id}, socket) do
     ids = MapSet.delete(socket.assigns.filter_assignee_ids, id)
-    {:noreply, socket |> assign(:filter_assignee_ids, ids) |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_assignee_ids, ids) |> reload_data()}
   end
 
   def handle_event("clear_filter", %{"id" => "status"}, socket) do
-    {:noreply, socket |> assign(:filter_status, "all") |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_status, "all") |> reload_data()}
   end
 
   def handle_event("clear_filter", %{"id" => "priority"}, socket) do
-    {:noreply, socket |> assign(:filter_priority, "all") |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_priority, "all") |> reload_data()}
   end
 
   def handle_event("clear_filter", %{"id" => "category"}, socket) do
-    {:noreply, socket |> assign(:filter_category, "all") |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_category, "all") |> reload_data()}
   end
 
   def handle_event("clear_filter", %{"id" => "location"}, socket) do
-    {:noreply, socket |> assign(:filter_location_id, "all") |> apply_all_filters()}
+    {:noreply, socket |> assign(:filter_location_id, "all") |> reload_data()}
   end
 
   def handle_event("clear_filter", %{"id" => "date_range"}, socket) do
-    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> apply_all_filters()}
+    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> reload_data()}
   end
 
   def handle_event("clear_all_filters", _, socket) do
@@ -1249,7 +1348,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
        assignee_search: "",
        search_query: ""
      )
-     |> apply_all_filters()}
+     |> reload_data()}
   end
 
   def handle_event("analyze_with_ai", _, socket) do
@@ -1283,7 +1382,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       changed_by: user.name || user.email
     })
     PubSubBroadcast.broadcast_ticket_updated(ticket)
-    {:noreply, socket |> assign(selected_ticket: ticket) |> reload_tickets()}
+    {:noreply, socket |> assign(selected_ticket: ticket) |> reload_data()}
   end
 
   def handle_event("update_status", %{"status" => status}, socket) do
@@ -1304,7 +1403,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
     })
     updated = Tickets.get_ticket!(ticket.id)
     PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+    {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
   end
 
   def handle_event("assign_to_org", params, socket) do
@@ -1335,7 +1434,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
       updated = Tickets.get_ticket!(ticket.id)
       PubSubBroadcast.broadcast_ticket_updated(updated)
-      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
     end
   end
 
@@ -1363,7 +1462,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
       updated = Tickets.get_ticket!(ticket.id)
       PubSubBroadcast.broadcast_ticket_updated(updated)
-      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
     end
   end
 
@@ -1401,7 +1500,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         to: cat_value
       })
       PubSubBroadcast.broadcast_ticket_updated(updated)
-      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
     end
   end
 
@@ -1423,7 +1522,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         })
         updated = Tickets.get_ticket!(ticket.id)
         PubSubBroadcast.broadcast_ticket_updated(updated)
-        {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+        {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to link asset (may already be linked)")}
@@ -1496,7 +1595,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         {:noreply,
          socket
          |> assign(selected_ticket: updated, ai_suggestions: suggestions, location_assets: location_assets)
-         |> reload_tickets()
+         |> reload_data()
          |> put_flash(:info, "AI suggestion applied")}
 
       :error ->
@@ -1517,101 +1616,105 @@ defmodule FixlyWeb.Admin.TicketListLive do
   # HELPERS
   # ==========================================
 
-  defp reload_tickets(socket) do
-    tickets = if socket.assigns.org_id, do: Tickets.list_tickets(socket.assigns.org_id), else: []
-    socket
-    |> assign(all_tickets: tickets, tickets: tickets)
-    |> assign(counts: compute_counts(tickets))
-    |> apply_all_filters()
-  end
+  defp reload_data(socket) do
+    org_id = socket.assigns.org_id
 
-  defp apply_all_filters(socket) do
-    filtered =
-      socket.assigns.all_tickets
-      |> filter_by_status(socket.assigns.filter_status)
-      |> filter_by_priority(socket.assigns.filter_priority)
-      |> filter_by_category(socket.assigns.filter_category)
-      |> filter_by_location(socket.assigns.filter_location_id)
-      |> filter_by_date_from(socket.assigns.filter_date_from)
-      |> filter_by_date_to(socket.assigns.filter_date_to)
-      |> filter_by_assignees(socket.assigns.filter_assignee_ids)
-      |> filter_tickets_by_search(socket.assigns.search_query)
+    if org_id do
+      filters = build_filters(socket.assigns)
 
-    assign(socket, tickets: filtered, grouped: group_by_status(filtered))
-  end
+      # Stat cards from DB (GROUP BY status) — one query for counts
+      status_counts = Tickets.count_tickets_by_status(org_id, filters)
+      counts = %{
+        total: status_counts |> Map.values() |> Enum.sum(),
+        open: Map.get(status_counts, "created", 0) + Map.get(status_counts, "triaged", 0),
+        in_progress: Map.get(status_counts, "assigned", 0) + Map.get(status_counts, "in_progress", 0),
+        on_hold: Map.get(status_counts, "on_hold", 0),
+        completed: Map.get(status_counts, "completed", 0) + Map.get(status_counts, "reviewed", 0) + Map.get(status_counts, "closed", 0)
+      }
 
-  defp filter_by_status(tickets, "all"), do: tickets
-  defp filter_by_status(tickets, status), do: Enum.filter(tickets, &(&1.status == status))
+      socket = assign(socket, :counts, counts)
 
-  defp filter_by_priority(tickets, "all"), do: tickets
-  defp filter_by_priority(tickets, priority), do: Enum.filter(tickets, &(&1.priority == priority))
+      # Kanban always needs grouped data
+      grouped = Tickets.list_tickets_by_status(org_id, filters, 20)
+      socket = assign(socket, :grouped, grouped)
 
-  defp filter_by_category(tickets, "all"), do: tickets
-  defp filter_by_category(tickets, category), do: Enum.filter(tickets, &(&1.category == category))
+      case socket.assigns.view_mode do
+        "kanban" ->
+          # Kanban only uses grouped, no stream needed
+          socket
+          |> stream(:tickets, [], reset: true)
+          |> assign(:cursor, nil)
+          |> assign(:has_more, false)
 
-  defp filter_by_location(tickets, "all"), do: tickets
-  defp filter_by_location(tickets, location_id), do: Enum.filter(tickets, &(&1.location_id == location_id))
-
-  defp filter_by_date_from(tickets, nil), do: tickets
-  defp filter_by_date_from(tickets, date_str) do
-    case Date.from_iso8601(date_str) do
-      {:ok, date} ->
-        from = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
-        Enum.filter(tickets, &(DateTime.compare(&1.inserted_at, from) != :lt))
-      _ -> tickets
-    end
-  end
-
-  defp filter_by_date_to(tickets, nil), do: tickets
-  defp filter_by_date_to(tickets, date_str) do
-    case Date.from_iso8601(date_str) do
-      {:ok, date} ->
-        to = DateTime.new!(date, ~T[23:59:59], "Etc/UTC")
-        Enum.filter(tickets, &(DateTime.compare(&1.inserted_at, to) != :gt))
-      _ -> tickets
-    end
-  end
-
-  defp filter_by_assignees(tickets, assignee_ids) do
-    if MapSet.size(assignee_ids) == 0 do
-      tickets
+        _ ->
+          # List view: flat stream with cursor pagination
+          page = Tickets.list_tickets_paginated(org_id, filters)
+          socket
+          |> assign(:cursor, page.cursor)
+          |> assign(:has_more, page.has_more)
+          |> stream(:tickets, page.entries, reset: true)
+      end
     else
-      Enum.filter(tickets, fn t ->
-        MapSet.member?(assignee_ids, t.assigned_to_user_id) ||
-          MapSet.member?(assignee_ids, t.assigned_to_org_id)
-      end)
+      empty_grouped =
+        ~w(created triaged assigned in_progress on_hold completed reviewed closed)
+        |> Enum.map(fn s -> {s, %{tickets: [], total: 0, has_more: false}} end)
+
+      socket
+      |> assign(:counts, %{total: 0, open: 0, in_progress: 0, on_hold: 0, completed: 0})
+      |> assign(:grouped, empty_grouped)
+      |> assign(:cursor, nil)
+      |> assign(:has_more, false)
+      |> stream(:tickets, [], reset: true)
     end
   end
 
-  defp compute_counts(tickets) do
-    %{
-      total: length(tickets),
-      open: length(Enum.filter(tickets, &(&1.status in ["created", "triaged"]))),
-      in_progress: length(Enum.filter(tickets, &(&1.status in ["assigned", "in_progress"]))),
-      on_hold: length(Enum.filter(tickets, &(&1.status == "on_hold"))),
-      completed: length(Enum.filter(tickets, &(&1.status in ["completed", "reviewed", "closed"])))
-    }
+  defp reload_counts(socket) do
+    if socket.assigns.org_id do
+      filters = build_filters(socket.assigns)
+      status_counts = Tickets.count_tickets_by_status(socket.assigns.org_id, filters)
+      %{
+        total: status_counts |> Map.values() |> Enum.sum(),
+        open: Map.get(status_counts, "created", 0) + Map.get(status_counts, "triaged", 0),
+        in_progress: Map.get(status_counts, "assigned", 0) + Map.get(status_counts, "in_progress", 0),
+        on_hold: Map.get(status_counts, "on_hold", 0),
+        completed: Map.get(status_counts, "completed", 0) + Map.get(status_counts, "reviewed", 0) + Map.get(status_counts, "closed", 0)
+      }
+    else
+      %{total: 0, open: 0, in_progress: 0, on_hold: 0, completed: 0}
+    end
   end
 
-  @status_order ["created", "triaged", "assigned", "on_hold", "in_progress", "completed", "reviewed", "closed"]
-
-  defp group_by_status(tickets) do
-    grouped = Enum.group_by(tickets, & &1.status)
-    Enum.map(@status_order, fn s -> {s, Map.get(grouped, s, [])} end)
+  defp maybe_reload_kanban(socket) do
+    if socket.assigns.org_id do
+      filters = build_filters(socket.assigns)
+      grouped = Tickets.list_tickets_by_status(socket.assigns.org_id, filters, 20)
+      assign(socket, :grouped, grouped)
+    else
+      socket
+    end
   end
 
-  defp filter_tickets_by_search(tickets, ""), do: tickets
-  defp filter_tickets_by_search(tickets, query) do
-    q = String.downcase(query)
+  defp build_filters(assigns) do
+    filters = %{}
+    filters = if assigns.filter_status != "all", do: Map.put(filters, :status, assigns.filter_status), else: filters
+    filters = if assigns.filter_priority != "all", do: Map.put(filters, :priority, assigns.filter_priority), else: filters
+    filters = if assigns.filter_category != "all", do: Map.put(filters, :category, assigns.filter_category), else: filters
+    filters = if assigns.filter_location_id != "all", do: Map.put(filters, :location_id, assigns.filter_location_id), else: filters
+    filters = if assigns.filter_date_from, do: Map.put(filters, :date_from, assigns.filter_date_from), else: filters
+    filters = if assigns.filter_date_to, do: Map.put(filters, :date_to, assigns.filter_date_to), else: filters
+    filters = if MapSet.size(assigns.filter_assignee_ids) > 0, do: Map.put(filters, :assignee_ids, assigns.filter_assignee_ids), else: filters
+    filters = if assigns.search_query != "", do: Map.put(filters, :search, assigns.search_query), else: filters
+    filters
+  end
 
-    Enum.filter(tickets, fn t ->
-      String.contains?(String.downcase(t.description || ""), q) ||
-        String.contains?(String.downcase(t.reference_number || ""), q) ||
-        String.contains?(String.downcase(t.submitter_name || ""), q) ||
-        String.contains?(String.downcase(t.category || ""), q) ||
-        String.contains?(String.downcase(t.custom_item_name || ""), q) ||
-        (t.location && String.contains?(String.downcase(t.location.name || ""), q))
-    end)
+  defp matches_filters?(ticket, assigns) do
+    (assigns.filter_status == "all" || ticket.status == assigns.filter_status) &&
+      (assigns.filter_priority == "all" || ticket.priority == assigns.filter_priority) &&
+      (assigns.filter_category == "all" || ticket.category == assigns.filter_category) &&
+      (assigns.filter_location_id == "all" || ticket.location_id == assigns.filter_location_id) &&
+      (MapSet.size(assigns.filter_assignee_ids) == 0 ||
+        MapSet.member?(assigns.filter_assignee_ids, ticket.assigned_to_user_id) ||
+        MapSet.member?(assigns.filter_assignee_ids, ticket.assigned_to_org_id))
   end
 
   defp status_actions("created"), do: [{"triaged", "Triage", "hero-clipboard-document-check"}, {"assigned", "Assign", "hero-user-plus"}]
@@ -1640,14 +1743,6 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp status_badge_class("on_hold"), do: "badge-warning"
   defp status_badge_class("completed"), do: "badge-success"
   defp status_badge_class(_), do: "badge-ghost"
-
-  defp status_bar_color("created"), do: "bg-success"
-  defp status_bar_color("triaged"), do: "bg-info"
-  defp status_bar_color("assigned"), do: "bg-primary"
-  defp status_bar_color("in_progress"), do: "bg-info"
-  defp status_bar_color("on_hold"), do: "bg-warning"
-  defp status_bar_color("completed"), do: "bg-success"
-  defp status_bar_color(_), do: "bg-base-content/30"
 
   defp status_dot_color("created"), do: "bg-success"
   defp status_dot_color("triaged"), do: "bg-info"

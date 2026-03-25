@@ -6,6 +6,85 @@ defmodule Fixly.Assets do
   alias Fixly.Assets.{Asset, TicketAssetLink}
   alias Fixly.Tickets.Ticket
 
+  # --- Paginated / DB-filtered queries ---
+
+  @doc "Paginated asset list with DB-level filtering."
+  def list_assets_paginated(org_id, filters \\ %{}, cursor \\ nil) do
+    Asset
+    |> where([a], a.organization_id == ^org_id)
+    |> apply_asset_filters(filters)
+    |> preload([:location])
+    |> Fixly.Pagination.paginate_asc(cursor: cursor)
+  end
+
+  @doc "Count assets grouped by status for stat cards."
+  def count_assets_by_status(org_id, filters \\ %{}) do
+    Asset
+    |> where([a], a.organization_id == ^org_id)
+    |> apply_asset_filters(filters)
+    |> group_by([a], a.status)
+    |> select([a], {a.status, count(a.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "Count assets by created_via for AI discovered stat."
+  def count_assets_by_created_via(org_id) do
+    Asset
+    |> where([a], a.organization_id == ^org_id)
+    |> where([a], a.created_via != "manual")
+    |> Repo.aggregate(:count, :id)
+  end
+
+  @doc "Total asset count for an org (with optional filters)."
+  def count_assets(org_id, filters \\ %{}) do
+    Asset
+    |> where([a], a.organization_id == ^org_id)
+    |> apply_asset_filters(filters)
+    |> Repo.aggregate(:count, :id)
+  end
+
+  defp apply_asset_filters(query, filters) when is_map(filters) do
+    query
+    |> maybe_asset_filter_categories(filters[:categories])
+    |> maybe_asset_filter_locations(filters[:location_ids])
+    |> maybe_asset_filter_statuses(filters[:statuses])
+    |> maybe_asset_filter_search(filters[:search])
+  end
+
+  defp maybe_asset_filter_categories(query, nil), do: query
+  defp maybe_asset_filter_categories(query, cats) do
+    cats = if is_struct(cats, MapSet), do: MapSet.to_list(cats), else: cats
+    if cats == [], do: query, else: where(query, [a], a.category in ^cats)
+  end
+
+  defp maybe_asset_filter_locations(query, nil), do: query
+  defp maybe_asset_filter_locations(query, ids) do
+    ids = if is_struct(ids, MapSet), do: MapSet.to_list(ids), else: ids
+    if ids == [], do: query, else: where(query, [a], a.location_id in ^ids)
+  end
+
+  defp maybe_asset_filter_statuses(query, nil), do: query
+  defp maybe_asset_filter_statuses(query, statuses) do
+    statuses = if is_struct(statuses, MapSet), do: MapSet.to_list(statuses), else: statuses
+    if statuses == [], do: query, else: where(query, [a], a.status in ^statuses)
+  end
+
+  defp maybe_asset_filter_search(query, nil), do: query
+  defp maybe_asset_filter_search(query, ""), do: query
+  defp maybe_asset_filter_search(query, search) when is_binary(search) do
+    pattern = "%#{search}%"
+
+    query
+    |> join(:left, [a], l in assoc(a, :location), as: :search_loc)
+    |> where(
+      [a, search_loc: l],
+      ilike(a.name, ^pattern) or
+        ilike(coalesce(a.category, ""), ^pattern) or
+        ilike(coalesce(l.name, ""), ^pattern)
+    )
+  end
+
   # --- Assets ---
 
   def get_asset!(id) do

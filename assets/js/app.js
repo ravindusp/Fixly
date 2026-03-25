@@ -27,11 +27,13 @@ import topbar from "../vendor/topbar"
 
 import { SLATimer } from "./hooks/sla_timer"
 import { KanbanDrop } from "./hooks/kanban_drop"
+import { InfiniteScroll } from "./hooks/infinite_scroll"
 
 const Hooks = {
   ...colocatedHooks,
   SLATimer,
   KanbanDrop,
+  InfiniteScroll,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
