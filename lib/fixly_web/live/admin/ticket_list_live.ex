@@ -24,16 +24,41 @@ defmodule FixlyWeb.Admin.TicketListLive do
     internal_users = if org_id, do: Accounts.list_users_by_organization(org_id), else: []
     contractor_orgs = if org_id, do: Organizations.list_contractor_orgs(org_id), else: []
 
+    # Build the assignee list (all users + contractor orgs for the filter)
+    all_assignees =
+      Enum.map(internal_users, fn u -> %{id: u.id, name: u.name || u.email, type: "user"} end) ++
+      Enum.map(contractor_orgs, fn o -> %{id: o.id, name: o.name, type: "org"} end)
+
+    # Categories from existing tickets
+    categories = tickets |> Enum.map(& &1.category) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
+
+    # Locations from existing tickets
+    locations = tickets |> Enum.map(& &1.location) |> Enum.reject(&is_nil/1) |> Enum.uniq_by(& &1.id) |> Enum.sort_by(& &1.name)
+
     socket =
       socket
       |> assign(:page_title, "Tickets")
+      |> assign(:all_tickets, tickets)
       |> assign(:tickets, tickets)
       |> assign(:grouped, grouped)
       |> assign(:counts, counts)
       |> assign(:view_mode, "list")
+      |> assign(:search_query, "")
+      # Filters
       |> assign(:filter_status, "all")
       |> assign(:filter_priority, "all")
-      |> assign(:search_query, "")
+      |> assign(:filter_category, "all")
+      |> assign(:filter_date_from, nil)
+      |> assign(:filter_date_to, nil)
+      |> assign(:filter_assignee_ids, MapSet.new())
+      |> assign(:filter_location_id, "all")
+      |> assign(:show_filters, false)
+      |> assign(:assignee_search, "")
+      # Reference data
+      |> assign(:all_assignees, all_assignees)
+      |> assign(:all_categories, categories)
+      |> assign(:all_locations, locations)
+      # Panel
       |> assign(:selected_ticket, nil)
       |> assign(:comments, [])
       |> assign(:comment_body, "")
@@ -103,7 +128,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
         <!-- Toolbar -->
         <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
-          <div class="flex items-center justify-between px-5 py-3.5 border-b border-base-300">
+          <!-- Top row: view toggle + search -->
+          <div class="flex items-center justify-between px-5 py-3 border-b border-base-300">
             <div class="flex items-center gap-2">
               <div class="join">
                 <button phx-click="set_view_mode" phx-value-mode="list" class={["join-item btn btn-sm", @view_mode == "list" && "btn-active"]}>
@@ -113,29 +139,15 @@ defmodule FixlyWeb.Admin.TicketListLive do
                   <.icon name="hero-view-columns" class="size-4" /> Kanban
                 </button>
               </div>
-              <div class="divider divider-horizontal mx-1 h-6"></div>
-              <!-- Status filter -->
-              <div class="dropdown">
-                <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1.5">
-                  <.icon name="hero-funnel" class="size-4" /> Filter
-                </div>
-                <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-44 p-2 shadow-lg border border-base-300">
-                  <li :for={{val, label} <- [{"all", "All Statuses"}, {"created", "Open"}, {"assigned", "Assigned"}, {"in_progress", "In Progress"}, {"on_hold", "On Hold"}, {"completed", "Completed"}]}>
-                    <a phx-click="set_filter_status" phx-value-status={val} class={@filter_status == val && "active"}>{label}</a>
-                  </li>
-                </ul>
-              </div>
-              <!-- Priority filter -->
-              <div class="dropdown">
-                <div tabindex="0" role="button" class="btn btn-sm btn-ghost gap-1.5">
-                  <.icon name="hero-flag" class="size-4" /> Priority
-                </div>
-                <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-40 p-2 shadow-lg border border-base-300">
-                  <li :for={{val, label} <- [{"all", "All"}, {"emergency", "Emergency"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"}]}>
-                    <a phx-click="set_filter_priority" phx-value-priority={val} class={@filter_priority == val && "active"}>{label}</a>
-                  </li>
-                </ul>
-              </div>
+              <div class="divider divider-horizontal mx-0 h-6"></div>
+              <button phx-click="toggle_filters" class={["btn btn-sm gap-1.5", @show_filters && "btn-primary btn-outline", !@show_filters && "btn-ghost"]}>
+                <.icon name="hero-adjustments-horizontal" class="size-4" />
+                Filters
+                <span :if={active_filter_count(assigns) > 0} class="badge badge-xs badge-primary">{active_filter_count(assigns)}</span>
+              </button>
+              <button :if={active_filter_count(assigns) > 0} phx-click="clear_all_filters" class="btn btn-sm btn-ghost text-error gap-1">
+                <.icon name="hero-x-mark" class="size-3.5" /> Clear all
+              </button>
             </div>
             <form phx-change="search" phx-submit="search" class="relative hidden sm:block">
               <.icon name="hero-magnifying-glass" class="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40" />
@@ -152,6 +164,163 @@ defmodule FixlyWeb.Admin.TicketListLive do
                 <.icon name="hero-x-mark" class="size-3.5" />
               </button>
             </form>
+          </div>
+
+          <!-- Active filter chips -->
+          <div :if={active_filter_count(assigns) > 0} class="flex flex-wrap items-center gap-1.5 px-5 py-2 border-b border-base-200 bg-base-200/30">
+            <span class="text-xs text-base-content/50 mr-1">Active:</span>
+            <.filter_chip :if={@filter_status != "all"} label={"Status: #{status_label(@filter_status)}"} event="clear_filter" value="status" />
+            <.filter_chip :if={@filter_priority != "all"} label={"Priority: #{String.capitalize(@filter_priority)}"} event="clear_filter" value="priority" />
+            <.filter_chip :if={@filter_category != "all"} label={"Category: #{String.capitalize(@filter_category)}"} event="clear_filter" value="category" />
+            <.filter_chip :if={@filter_date_from} label={"From: #{@filter_date_from}"} event="clear_filter" value="date_from" />
+            <.filter_chip :if={@filter_date_to} label={"To: #{@filter_date_to}"} event="clear_filter" value="date_to" />
+            <.filter_chip :if={@filter_location_id != "all"} label={"Location"} event="clear_filter" value="location" />
+            <.filter_chip
+              :for={aid <- MapSet.to_list(@filter_assignee_ids)}
+              label={assignee_name(aid, @all_assignees)}
+              event="remove_assignee"
+              value={aid}
+            />
+          </div>
+
+          <!-- Filter panel (collapsible) -->
+          <div :if={@show_filters} class="px-5 py-4 border-b border-base-300 bg-base-200/20">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <!-- Status -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Status</label>
+                <form phx-change="set_filter_status">
+                  <select name="status" class="select select-sm select-bordered w-full" value={@filter_status}>
+                    <option :for={{val, label} <- [{"all", "All Statuses"}, {"created", "Open"}, {"triaged", "Triaged"}, {"assigned", "Assigned"}, {"on_hold", "On Hold"}, {"in_progress", "In Progress"}, {"completed", "Completed"}, {"closed", "Closed"}]} value={val} selected={@filter_status == val}>
+                      {label}
+                    </option>
+                  </select>
+                </form>
+              </div>
+
+              <!-- Priority -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Priority</label>
+                <form phx-change="set_filter_priority">
+                  <select name="priority" class="select select-sm select-bordered w-full">
+                    <option :for={{val, label} <- [{"all", "All Priorities"}, {"emergency", "Emergency"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"}]} value={val} selected={@filter_priority == val}>
+                      {label}
+                    </option>
+                  </select>
+                </form>
+              </div>
+
+              <!-- Category -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Category</label>
+                <form phx-change="set_filter_category">
+                  <select name="category" class="select select-sm select-bordered w-full">
+                    <option value="all" selected={@filter_category == "all"}>All Categories</option>
+                    <option :for={cat <- @all_categories} value={cat} selected={@filter_category == cat}>
+                      {String.capitalize(cat)}
+                    </option>
+                  </select>
+                </form>
+              </div>
+
+              <!-- Location -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Location</label>
+                <form phx-change="set_filter_location">
+                  <select name="location_id" class="select select-sm select-bordered w-full">
+                    <option value="all" selected={@filter_location_id == "all"}>All Locations</option>
+                    <option :for={loc <- @all_locations} value={loc.id} selected={@filter_location_id == loc.id}>
+                      {loc.name}
+                    </option>
+                  </select>
+                </form>
+              </div>
+
+              <!-- Date from -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date From</label>
+                <form phx-change="set_filter_date_from">
+                  <input
+                    type="date"
+                    name="date"
+                    value={@filter_date_from}
+                    class="input input-sm input-bordered w-full"
+                  />
+                </form>
+              </div>
+
+              <!-- Date to -->
+              <div>
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date To</label>
+                <form phx-change="set_filter_date_to">
+                  <input
+                    type="date"
+                    name="date"
+                    value={@filter_date_to}
+                    class="input input-sm input-bordered w-full"
+                  />
+                </form>
+              </div>
+
+              <!-- Assigned To (multi-select combobox) -->
+              <div class="col-span-2">
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Assigned To</label>
+                <div class="relative">
+                  <div class="flex flex-wrap gap-1.5 p-1.5 min-h-[36px] border border-base-300 rounded-lg bg-base-100 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20">
+                    <!-- Selected assignee tags -->
+                    <span
+                      :for={aid <- MapSet.to_list(@filter_assignee_ids)}
+                      class="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-md text-xs font-medium"
+                    >
+                      {assignee_name(aid, @all_assignees)}
+                      <button type="button" phx-click="remove_assignee" phx-value-id={aid} class="hover:text-error">
+                        <.icon name="hero-x-mark" class="size-3" />
+                      </button>
+                    </span>
+                    <!-- Search input -->
+                    <form phx-change="assignee_search" class="flex-1 min-w-[120px]">
+                      <input
+                        type="text"
+                        name="query"
+                        value={@assignee_search}
+                        placeholder={if MapSet.size(@filter_assignee_ids) == 0, do: "Search assignees...", else: "Add more..."}
+                        class="w-full border-0 bg-transparent text-sm focus:outline-none focus:ring-0 px-1 py-0.5"
+                        autocomplete="off"
+                        phx-debounce="150"
+                      />
+                    </form>
+                  </div>
+                  <!-- Dropdown results -->
+                  <div :if={@assignee_search != ""} class="absolute z-20 mt-1 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div
+                      :for={a <- filtered_assignees(@all_assignees, @assignee_search, @filter_assignee_ids)}
+                      phx-click="add_assignee"
+                      phx-value-id={a.id}
+                      class="flex items-center gap-2.5 px-3 py-2 hover:bg-base-200 cursor-pointer transition-colors"
+                    >
+                      <div class={[
+                        "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold",
+                        a.type == "user" && "bg-primary/10 text-primary",
+                        a.type == "org" && "bg-warning/10 text-warning"
+                      ]}>
+                        {String.first(a.name) |> String.upcase()}
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <span class="text-sm text-base-content">{a.name}</span>
+                      </div>
+                      <span class={[
+                        "badge badge-xs",
+                        a.type == "user" && "badge-primary badge-outline",
+                        a.type == "org" && "badge-warning badge-outline"
+                      ]}>{if a.type == "user", do: "Person", else: "Company"}</span>
+                    </div>
+                    <div :if={filtered_assignees(@all_assignees, @assignee_search, @filter_assignee_ids) == []} class="px-3 py-3 text-sm text-base-content/40 text-center">
+                      No matches found
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- List view -->
@@ -600,6 +769,21 @@ defmodule FixlyWeb.Admin.TicketListLive do
   # SHARED COMPONENTS
   # ==========================================
 
+  attr :label, :string, required: true
+  attr :event, :string, required: true
+  attr :value, :string, required: true
+
+  defp filter_chip(assigns) do
+    ~H"""
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-base-200 rounded-full text-xs font-medium text-base-content/70">
+      {@label}
+      <button type="button" phx-click={@event} phx-value-id={@value} class="text-base-content/40 hover:text-error transition-colors">
+        <.icon name="hero-x-mark" class="size-3" />
+      </button>
+    </span>
+    """
+  end
+
   defp empty_state(assigns) do
     ~H"""
     <div class="flex flex-col items-center justify-center py-20 text-center">
@@ -701,26 +885,95 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, assign(socket, :view_mode, mode)}
   end
 
-  def handle_event("set_filter_status", %{"status" => status}, socket) do
-    tickets =
-      if socket.assigns.org_id do
-        if status == "all", do: Tickets.list_tickets(socket.assigns.org_id), else: Tickets.list_tickets(socket.assigns.org_id, status: status)
-      else
-        []
-      end
+  def handle_event("toggle_filters", _, socket) do
+    {:noreply, assign(socket, :show_filters, !socket.assigns.show_filters)}
+  end
 
-    {:noreply, socket |> assign(filter_status: status, tickets: tickets, grouped: group_by_status(tickets), selected_ticket: nil, comments: [])}
+  def handle_event("set_filter_status", %{"status" => status}, socket) do
+    {:noreply, socket |> assign(:filter_status, status) |> apply_all_filters()}
   end
 
   def handle_event("set_filter_priority", %{"priority" => priority}, socket) do
-    tickets =
-      if socket.assigns.org_id do
-        if priority == "all", do: Tickets.list_tickets(socket.assigns.org_id), else: Tickets.list_tickets(socket.assigns.org_id, priority: priority)
-      else
-        []
-      end
+    {:noreply, socket |> assign(:filter_priority, priority) |> apply_all_filters()}
+  end
 
-    {:noreply, socket |> assign(filter_priority: priority, tickets: tickets, grouped: group_by_status(tickets), selected_ticket: nil, comments: [])}
+  def handle_event("set_filter_category", %{"category" => category}, socket) do
+    {:noreply, socket |> assign(:filter_category, category) |> apply_all_filters()}
+  end
+
+  def handle_event("set_filter_location", %{"location_id" => location_id}, socket) do
+    {:noreply, socket |> assign(:filter_location_id, location_id) |> apply_all_filters()}
+  end
+
+  def handle_event("set_filter_date_from", %{"date" => ""}, socket) do
+    {:noreply, socket |> assign(:filter_date_from, nil) |> apply_all_filters()}
+  end
+
+  def handle_event("set_filter_date_from", %{"date" => date}, socket) do
+    {:noreply, socket |> assign(:filter_date_from, date) |> apply_all_filters()}
+  end
+
+  def handle_event("set_filter_date_to", %{"date" => ""}, socket) do
+    {:noreply, socket |> assign(:filter_date_to, nil) |> apply_all_filters()}
+  end
+
+  def handle_event("set_filter_date_to", %{"date" => date}, socket) do
+    {:noreply, socket |> assign(:filter_date_to, date) |> apply_all_filters()}
+  end
+
+  def handle_event("assignee_search", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :assignee_search, query)}
+  end
+
+  def handle_event("add_assignee", %{"id" => id}, socket) do
+    ids = MapSet.put(socket.assigns.filter_assignee_ids, id)
+    {:noreply, socket |> assign(filter_assignee_ids: ids, assignee_search: "") |> apply_all_filters()}
+  end
+
+  def handle_event("remove_assignee", %{"id" => id}, socket) do
+    ids = MapSet.delete(socket.assigns.filter_assignee_ids, id)
+    {:noreply, socket |> assign(:filter_assignee_ids, ids) |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "status"}, socket) do
+    {:noreply, socket |> assign(:filter_status, "all") |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "priority"}, socket) do
+    {:noreply, socket |> assign(:filter_priority, "all") |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "category"}, socket) do
+    {:noreply, socket |> assign(:filter_category, "all") |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "location"}, socket) do
+    {:noreply, socket |> assign(:filter_location_id, "all") |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "date_from"}, socket) do
+    {:noreply, socket |> assign(:filter_date_from, nil) |> apply_all_filters()}
+  end
+
+  def handle_event("clear_filter", %{"id" => "date_to"}, socket) do
+    {:noreply, socket |> assign(:filter_date_to, nil) |> apply_all_filters()}
+  end
+
+  def handle_event("clear_all_filters", _, socket) do
+    {:noreply,
+     socket
+     |> assign(
+       filter_status: "all",
+       filter_priority: "all",
+       filter_category: "all",
+       filter_date_from: nil,
+       filter_date_to: nil,
+       filter_assignee_ids: MapSet.new(),
+       filter_location_id: "all",
+       assignee_search: "",
+       search_query: ""
+     )
+     |> apply_all_filters()}
   end
 
   def handle_event("set_priority", %{"priority" => priority}, socket) do
@@ -817,7 +1070,68 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp reload_tickets(socket) do
     tickets = if socket.assigns.org_id, do: Tickets.list_tickets(socket.assigns.org_id), else: []
-    assign(socket, tickets: tickets, grouped: group_by_status(tickets), counts: compute_counts(tickets))
+    socket
+    |> assign(all_tickets: tickets, tickets: tickets)
+    |> assign(counts: compute_counts(tickets))
+    |> apply_all_filters()
+  end
+
+  defp apply_all_filters(socket) do
+    filtered =
+      socket.assigns.all_tickets
+      |> filter_by_status(socket.assigns.filter_status)
+      |> filter_by_priority(socket.assigns.filter_priority)
+      |> filter_by_category(socket.assigns.filter_category)
+      |> filter_by_location(socket.assigns.filter_location_id)
+      |> filter_by_date_from(socket.assigns.filter_date_from)
+      |> filter_by_date_to(socket.assigns.filter_date_to)
+      |> filter_by_assignees(socket.assigns.filter_assignee_ids)
+      |> filter_tickets_by_search(socket.assigns.search_query)
+
+    assign(socket, tickets: filtered, grouped: group_by_status(filtered))
+  end
+
+  defp filter_by_status(tickets, "all"), do: tickets
+  defp filter_by_status(tickets, status), do: Enum.filter(tickets, &(&1.status == status))
+
+  defp filter_by_priority(tickets, "all"), do: tickets
+  defp filter_by_priority(tickets, priority), do: Enum.filter(tickets, &(&1.priority == priority))
+
+  defp filter_by_category(tickets, "all"), do: tickets
+  defp filter_by_category(tickets, category), do: Enum.filter(tickets, &(&1.category == category))
+
+  defp filter_by_location(tickets, "all"), do: tickets
+  defp filter_by_location(tickets, location_id), do: Enum.filter(tickets, &(&1.location_id == location_id))
+
+  defp filter_by_date_from(tickets, nil), do: tickets
+  defp filter_by_date_from(tickets, date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} ->
+        from = DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+        Enum.filter(tickets, &(DateTime.compare(&1.inserted_at, from) != :lt))
+      _ -> tickets
+    end
+  end
+
+  defp filter_by_date_to(tickets, nil), do: tickets
+  defp filter_by_date_to(tickets, date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} ->
+        to = DateTime.new!(date, ~T[23:59:59], "Etc/UTC")
+        Enum.filter(tickets, &(DateTime.compare(&1.inserted_at, to) != :gt))
+      _ -> tickets
+    end
+  end
+
+  defp filter_by_assignees(tickets, assignee_ids) do
+    if MapSet.size(assignee_ids) == 0 do
+      tickets
+    else
+      Enum.filter(tickets, fn t ->
+        MapSet.member?(assignee_ids, t.assigned_to_user_id) ||
+          MapSet.member?(assignee_ids, t.assigned_to_org_id)
+      end)
+    end
   end
 
   defp compute_counts(tickets) do
@@ -958,4 +1272,33 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp truncate(nil, _), do: ""
   defp truncate(string, max) when byte_size(string) <= max, do: string
   defp truncate(string, max), do: String.slice(string, 0, max) <> "..."
+
+  # --- Filter helpers ---
+
+  defp active_filter_count(assigns) do
+    count = 0
+    count = if assigns.filter_status != "all", do: count + 1, else: count
+    count = if assigns.filter_priority != "all", do: count + 1, else: count
+    count = if assigns.filter_category != "all", do: count + 1, else: count
+    count = if assigns.filter_location_id != "all", do: count + 1, else: count
+    count = if assigns.filter_date_from, do: count + 1, else: count
+    count = if assigns.filter_date_to, do: count + 1, else: count
+    count + MapSet.size(assigns.filter_assignee_ids)
+  end
+
+  defp filtered_assignees(all_assignees, query, selected_ids) do
+    q = String.downcase(query)
+
+    all_assignees
+    |> Enum.reject(fn a -> MapSet.member?(selected_ids, a.id) end)
+    |> Enum.filter(fn a -> String.contains?(String.downcase(a.name), q) end)
+    |> Enum.take(8)
+  end
+
+  defp assignee_name(id, all_assignees) do
+    case Enum.find(all_assignees, fn a -> a.id == id end) do
+      nil -> "Unknown"
+      a -> a.name
+    end
+  end
 end
