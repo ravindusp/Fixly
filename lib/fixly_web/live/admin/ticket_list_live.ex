@@ -164,7 +164,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </div>
 
           <!-- Kanban view -->
-          <div :if={@view_mode == "kanban"} class="p-5">
+          <div :if={@view_mode == "kanban"} class="p-5 flex-1">
             <%= if @tickets == [] do %>
               <.empty_state />
             <% else %>
@@ -523,7 +523,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   defp kanban_board(assigns) do
     ~H"""
-    <div class="flex gap-4 overflow-x-auto pb-4">
+    <div class="flex gap-4 overflow-x-auto pb-4 items-stretch min-h-[400px]">
       <.kanban_column :for={{status, tickets} <- @grouped} status={status} tickets={tickets} selected_id={@selected_id} />
     </div>
     """
@@ -536,7 +536,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp kanban_column(assigns) do
     ~H"""
     <div
-      class="flex-shrink-0 w-72"
+      class="flex-shrink-0 w-72 flex flex-col"
       id={"kanban-col-#{@status}"}
       phx-hook="KanbanDrop"
       data-status={@status}
@@ -546,7 +546,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         <span class="text-sm font-semibold text-base-content">{status_label(@status)}</span>
         <span class="badge badge-sm badge-ghost">{length(@tickets)}</span>
       </div>
-      <div class="space-y-2.5 min-h-[60px] kanban-dropzone rounded-lg transition-colors">
+      <div class="space-y-2.5 flex-1 min-h-[200px] kanban-dropzone rounded-lg transition-colors p-1">
         <.kanban_card :for={ticket <- @tickets} ticket={ticket} selected={@selected_id == ticket.id} />
       </div>
     </div>
