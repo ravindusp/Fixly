@@ -27,6 +27,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
       |> assign(:filter_category, "all")
       |> assign(:filter_location, "all")
       |> assign(:filter_status, "all")
+      |> assign(:categories, @categories)
       |> assign(:selected_asset, nil)
       |> assign(:show_add_form, false)
       |> assign(:add_form, %{name: "", category: "", location_id: ""})
