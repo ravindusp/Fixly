@@ -7,6 +7,12 @@ defmodule FixlyWeb.Admin.AssetsLive do
   alias Fixly.Tickets
 
   @categories ~w(hvac plumbing electrical structural appliance furniture it other)
+  @statuses [
+    {"operational", "Operational"},
+    {"needs_repair", "Needs Repair"},
+    {"out_of_service", "Out of Service"},
+    {"decommissioned", "Decommissioned"}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,9 +30,15 @@ defmodule FixlyWeb.Admin.AssetsLive do
       |> assign(:assets, assets)
       |> assign(:locations, locations)
       |> assign(:search_query, "")
-      |> assign(:filter_category, "all")
-      |> assign(:filter_location, "all")
-      |> assign(:filter_status, "all")
+      |> assign(:filter_categories, MapSet.new())
+      |> assign(:filter_location_ids, MapSet.new())
+      |> assign(:filter_statuses, MapSet.new())
+      |> assign(:show_category_filter, false)
+      |> assign(:show_location_filter, false)
+      |> assign(:show_status_filter, false)
+      |> assign(:category_filter_search, "")
+      |> assign(:location_filter_search, "")
+      |> assign(:status_filter_search, "")
       |> assign(:categories, @categories)
       |> assign(:selected_asset, nil)
       |> assign(:show_add_form, false)
@@ -68,27 +80,147 @@ defmodule FixlyWeb.Admin.AssetsLive do
 
               <!-- Filters -->
               <div class="flex items-center gap-2">
-                <form phx-change="set_filter_category">
-                  <select name="category" class="select select-xs select-bordered">
-                    <option value="all">All Categories</option>
-                    <option :for={cat <- @categories} value={cat} selected={@filter_category == cat}>{String.capitalize(cat)}</option>
-                  </select>
-                </form>
-                <form phx-change="set_filter_location">
-                  <select name="location_id" class="select select-xs select-bordered">
-                    <option value="all">All Locations</option>
-                    <option :for={loc <- @locations} value={loc.id} selected={@filter_location == loc.id}>
-                      {String.duplicate("— ", loc.depth)}{loc.name}
-                    </option>
-                  </select>
-                </form>
-                <form phx-change="set_filter_status">
-                  <select name="status" class="select select-xs select-bordered">
-                    <option value="all">All Statuses</option>
-                    <option :for={{val, label} <- [{"operational", "Operational"}, {"needs_repair", "Needs Repair"}, {"out_of_service", "Out of Service"}, {"decommissioned", "Decommissioned"}]} value={val} selected={@filter_status == val}>{label}</option>
-                  </select>
-                </form>
-                <button :if={@filter_category != "all" || @filter_location != "all" || @filter_status != "all" || @search_query != ""} phx-click="clear_filters" class="btn btn-xs btn-ghost text-error gap-1">
+                <%!-- Category combobox --%>
+                <div class="relative" phx-click-away="close_category_filter">
+                  <button phx-click="toggle_category_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span :if={MapSet.size(@filter_categories) == 0} class="text-base-content/60">All Categories</span>
+                      <span :if={MapSet.size(@filter_categories) > 0} class="flex items-center gap-1">
+                        <span class="badge badge-xs badge-primary">{MapSet.size(@filter_categories)}</span>
+                        <span class="text-xs truncate">selected</span>
+                      </span>
+                    </div>
+                    <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                  </button>
+
+                  <div :if={@show_category_filter} class="absolute z-30 mt-1 w-64 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                    <div class="p-2 border-b border-base-200">
+                      <form phx-change="search_category_filter">
+                        <input type="text" name="query" value={@category_filter_search} placeholder="Search categories..."
+                          class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                      </form>
+                    </div>
+                    <div class="max-h-56 overflow-y-auto p-1">
+                      <button
+                        :for={cat <- filtered_categories(@categories, @category_filter_search)}
+                        phx-click="toggle_category_item"
+                        phx-value-id={cat}
+                        class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                      >
+                        <div class={[
+                          "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                          MapSet.member?(@filter_categories, cat) && "bg-primary border-primary",
+                          !MapSet.member?(@filter_categories, cat) && "border-base-300"
+                        ]}>
+                          <.icon :if={MapSet.member?(@filter_categories, cat)} name="hero-check" class="size-2.5 text-primary-content" />
+                        </div>
+                        <span class={["w-2.5 h-2.5 rounded-full shrink-0", category_dot_color(cat)]}></span>
+                        <span class="text-sm">{String.capitalize(cat)}</span>
+                      </button>
+                    </div>
+                    <div class="p-2 border-t border-base-200 flex justify-between">
+                      <button phx-click="clear_category_filter" class="btn btn-xs btn-ghost">Clear</button>
+                      <button phx-click="toggle_category_filter" class="btn btn-xs btn-primary">Done</button>
+                    </div>
+                  </div>
+                </div>
+
+                <%!-- Location combobox --%>
+                <div class="relative" phx-click-away="close_location_filter">
+                  <button phx-click="toggle_location_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span :if={MapSet.size(@filter_location_ids) == 0} class="text-base-content/60">All Locations</span>
+                      <span :if={MapSet.size(@filter_location_ids) > 0} class="flex items-center gap-1">
+                        <span class="badge badge-xs badge-primary">{MapSet.size(@filter_location_ids)}</span>
+                        <span class="text-xs truncate">selected</span>
+                      </span>
+                    </div>
+                    <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                  </button>
+
+                  <div :if={@show_location_filter} class="absolute z-30 mt-1 w-72 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                    <div class="p-2 border-b border-base-200">
+                      <form phx-change="search_location_filter">
+                        <input type="text" name="query" value={@location_filter_search} placeholder="Search locations..."
+                          class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                      </form>
+                    </div>
+                    <div class="max-h-56 overflow-y-auto p-1">
+                      <button
+                        :for={loc <- filtered_locations(@locations, @location_filter_search)}
+                        phx-click="toggle_location_item"
+                        phx-value-id={loc.id}
+                        style={"padding-left: #{loc.depth * 16 + 8}px"}
+                        class="flex items-center gap-2.5 w-full pr-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                      >
+                        <div class={[
+                          "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                          MapSet.member?(@filter_location_ids, loc.id) && "bg-primary border-primary",
+                          !MapSet.member?(@filter_location_ids, loc.id) && "border-base-300"
+                        ]}>
+                          <.icon :if={MapSet.member?(@filter_location_ids, loc.id)} name="hero-check" class="size-2.5 text-primary-content" />
+                        </div>
+                        <span class={["text-sm truncate", loc.depth == 0 && "font-semibold"]}>{loc.name}</span>
+                        <span :if={loc[:label]} class="badge badge-xs badge-ghost ml-auto shrink-0">{loc.label}</span>
+                      </button>
+                    </div>
+                    <div class="p-2 border-t border-base-200 flex justify-between">
+                      <button phx-click="clear_location_filter" class="btn btn-xs btn-ghost">Clear</button>
+                      <button phx-click="toggle_location_filter" class="btn btn-xs btn-primary">Done</button>
+                    </div>
+                  </div>
+                </div>
+
+                <%!-- Status combobox --%>
+                <div class="relative" phx-click-away="close_status_filter">
+                  <button phx-click="toggle_status_filter" class="btn btn-sm btn-ghost border border-base-300 gap-1.5 min-w-[140px] justify-between">
+                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span :if={MapSet.size(@filter_statuses) == 0} class="text-base-content/60">All Statuses</span>
+                      <span :if={MapSet.size(@filter_statuses) > 0} class="flex items-center gap-1">
+                        <span class="badge badge-xs badge-primary">{MapSet.size(@filter_statuses)}</span>
+                        <span class="text-xs truncate">selected</span>
+                      </span>
+                    </div>
+                    <.icon name="hero-chevron-down" class="size-3.5 text-base-content/40 shrink-0" />
+                  </button>
+
+                  <div :if={@show_status_filter} class="absolute z-30 mt-1 w-64 bg-base-100 border border-base-300 rounded-xl shadow-xl overflow-hidden">
+                    <div class="p-2 border-b border-base-200">
+                      <form phx-change="search_status_filter">
+                        <input type="text" name="query" value={@status_filter_search} placeholder="Search statuses..."
+                          class="input input-xs input-bordered w-full" autocomplete="off" phx-debounce="150" />
+                      </form>
+                    </div>
+                    <div class="max-h-56 overflow-y-auto p-1">
+                      <button
+                        :for={{val, label} <- filtered_statuses(@status_filter_search)}
+                        phx-click="toggle_status_item"
+                        phx-value-id={val}
+                        class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg hover:bg-base-200 transition-colors text-left"
+                      >
+                        <div class={[
+                          "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                          MapSet.member?(@filter_statuses, val) && "bg-primary border-primary",
+                          !MapSet.member?(@filter_statuses, val) && "border-base-300"
+                        ]}>
+                          <.icon :if={MapSet.member?(@filter_statuses, val)} name="hero-check" class="size-2.5 text-primary-content" />
+                        </div>
+                        <span class={["w-2.5 h-2.5 rounded-full shrink-0", status_dot_color(val)]}></span>
+                        <span class="text-sm">{label}</span>
+                      </button>
+                    </div>
+                    <div class="p-2 border-t border-base-200 flex justify-between">
+                      <button phx-click="clear_status_filter" class="btn btn-xs btn-ghost">Clear</button>
+                      <button phx-click="toggle_status_filter" class="btn btn-xs btn-primary">Done</button>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  :if={MapSet.size(@filter_categories) > 0 || MapSet.size(@filter_location_ids) > 0 || MapSet.size(@filter_statuses) > 0 || @search_query != ""}
+                  phx-click="clear_filters"
+                  class="btn btn-xs btn-ghost text-error gap-1"
+                >
                   <.icon name="hero-x-mark" class="size-3" /> Clear
                 </button>
               </div>
@@ -265,20 +397,128 @@ defmodule FixlyWeb.Admin.AssetsLive do
     {:noreply, socket |> assign(:search_query, query) |> apply_filters()}
   end
 
-  def handle_event("set_filter_category", %{"category" => cat}, socket) do
-    {:noreply, socket |> assign(:filter_category, cat) |> apply_filters()}
+  # Category filter events
+  def handle_event("toggle_category_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_category_filter, !socket.assigns.show_category_filter)
+     |> assign(:show_location_filter, false)
+     |> assign(:show_status_filter, false)}
   end
 
-  def handle_event("set_filter_location", %{"location_id" => loc}, socket) do
-    {:noreply, socket |> assign(:filter_location, loc) |> apply_filters()}
+  def handle_event("close_category_filter", _, socket) do
+    {:noreply, assign(socket, :show_category_filter, false)}
   end
 
-  def handle_event("set_filter_status", %{"status" => status}, socket) do
-    {:noreply, socket |> assign(:filter_status, status) |> apply_filters()}
+  def handle_event("search_category_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :category_filter_search, query)}
   end
 
+  def handle_event("toggle_category_item", %{"id" => cat}, socket) do
+    updated =
+      if MapSet.member?(socket.assigns.filter_categories, cat) do
+        MapSet.delete(socket.assigns.filter_categories, cat)
+      else
+        MapSet.put(socket.assigns.filter_categories, cat)
+      end
+
+    {:noreply, socket |> assign(:filter_categories, updated) |> apply_filters()}
+  end
+
+  def handle_event("clear_category_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:filter_categories, MapSet.new())
+     |> assign(:category_filter_search, "")
+     |> apply_filters()}
+  end
+
+  # Location filter events
+  def handle_event("toggle_location_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_location_filter, !socket.assigns.show_location_filter)
+     |> assign(:show_category_filter, false)
+     |> assign(:show_status_filter, false)}
+  end
+
+  def handle_event("close_location_filter", _, socket) do
+    {:noreply, assign(socket, :show_location_filter, false)}
+  end
+
+  def handle_event("search_location_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :location_filter_search, query)}
+  end
+
+  def handle_event("toggle_location_item", %{"id" => id}, socket) do
+    updated =
+      if MapSet.member?(socket.assigns.filter_location_ids, id) do
+        MapSet.delete(socket.assigns.filter_location_ids, id)
+      else
+        MapSet.put(socket.assigns.filter_location_ids, id)
+      end
+
+    {:noreply, socket |> assign(:filter_location_ids, updated) |> apply_filters()}
+  end
+
+  def handle_event("clear_location_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:filter_location_ids, MapSet.new())
+     |> assign(:location_filter_search, "")
+     |> apply_filters()}
+  end
+
+  # Status filter events
+  def handle_event("toggle_status_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_status_filter, !socket.assigns.show_status_filter)
+     |> assign(:show_category_filter, false)
+     |> assign(:show_location_filter, false)}
+  end
+
+  def handle_event("close_status_filter", _, socket) do
+    {:noreply, assign(socket, :show_status_filter, false)}
+  end
+
+  def handle_event("search_status_filter", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :status_filter_search, query)}
+  end
+
+  def handle_event("toggle_status_item", %{"id" => val}, socket) do
+    updated =
+      if MapSet.member?(socket.assigns.filter_statuses, val) do
+        MapSet.delete(socket.assigns.filter_statuses, val)
+      else
+        MapSet.put(socket.assigns.filter_statuses, val)
+      end
+
+    {:noreply, socket |> assign(:filter_statuses, updated) |> apply_filters()}
+  end
+
+  def handle_event("clear_status_filter", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:filter_statuses, MapSet.new())
+     |> assign(:status_filter_search, "")
+     |> apply_filters()}
+  end
+
+  # Clear all filters
   def handle_event("clear_filters", _, socket) do
-    {:noreply, socket |> assign(search_query: "", filter_category: "all", filter_location: "all", filter_status: "all") |> apply_filters()}
+    {:noreply,
+     socket
+     |> assign(
+       search_query: "",
+       filter_categories: MapSet.new(),
+       filter_location_ids: MapSet.new(),
+       filter_statuses: MapSet.new(),
+       category_filter_search: "",
+       location_filter_search: "",
+       status_filter_search: ""
+     )
+     |> apply_filters()}
   end
 
   def handle_event("toggle_add_form", _, socket) do
@@ -336,9 +576,9 @@ defmodule FixlyWeb.Admin.AssetsLive do
     filtered =
       socket.assigns.all_assets
       |> filter_by_search(socket.assigns.search_query)
-      |> filter_by_category(socket.assigns.filter_category)
-      |> filter_by_location(socket.assigns.filter_location)
-      |> filter_by_status(socket.assigns.filter_status)
+      |> filter_by_categories(socket.assigns.filter_categories)
+      |> filter_by_location_ids(socket.assigns.filter_location_ids)
+      |> filter_by_statuses(socket.assigns.filter_statuses)
 
     assign(socket, :assets, filtered)
   end
@@ -353,14 +593,39 @@ defmodule FixlyWeb.Admin.AssetsLive do
     end)
   end
 
-  defp filter_by_category(assets, "all"), do: assets
-  defp filter_by_category(assets, cat), do: Enum.filter(assets, &(&1.category == cat))
+  defp filter_by_categories(assets, %MapSet{} = cats) do
+    if MapSet.size(cats) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(cats, &1.category))
+  end
 
-  defp filter_by_location(assets, "all"), do: assets
-  defp filter_by_location(assets, loc_id), do: Enum.filter(assets, &(&1.location_id == loc_id))
+  defp filter_by_location_ids(assets, %MapSet{} = ids) do
+    if MapSet.size(ids) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(ids, &1.location_id))
+  end
 
-  defp filter_by_status(assets, "all"), do: assets
-  defp filter_by_status(assets, status), do: Enum.filter(assets, &(&1.status == status))
+  defp filter_by_statuses(assets, %MapSet{} = statuses) do
+    if MapSet.size(statuses) == 0, do: assets, else: Enum.filter(assets, &MapSet.member?(statuses, &1.status))
+  end
+
+  # Filtered option lists for combobox search
+
+  defp filtered_categories(categories, ""), do: categories
+  defp filtered_categories(categories, query) do
+    q = String.downcase(query)
+    Enum.filter(categories, fn cat -> String.contains?(String.downcase(cat), q) end)
+  end
+
+  defp filtered_locations(locations, ""), do: locations
+  defp filtered_locations(locations, query) do
+    q = String.downcase(query)
+    Enum.filter(locations, fn loc -> String.contains?(String.downcase(loc.name), q) end)
+  end
+
+  defp filtered_statuses("") do
+    @statuses
+  end
+  defp filtered_statuses(query) do
+    q = String.downcase(query)
+    Enum.filter(@statuses, fn {_val, label} -> String.contains?(String.downcase(label), q) end)
+  end
 
   defp flatten_tree(nodes, acc \\ []) do
     Enum.reduce(nodes, acc, fn node, acc ->
@@ -373,6 +638,23 @@ defmodule FixlyWeb.Admin.AssetsLive do
   defp status_label("out_of_service"), do: "Out of Service"
   defp status_label("decommissioned"), do: "Decommissioned"
   defp status_label(other), do: String.capitalize(to_string(other))
+
+  # Category dot colors for combobox
+  defp category_dot_color("hvac"), do: "bg-red-500"
+  defp category_dot_color("plumbing"), do: "bg-blue-500"
+  defp category_dot_color("electrical"), do: "bg-yellow-500"
+  defp category_dot_color("structural"), do: "bg-stone-500"
+  defp category_dot_color("appliance"), do: "bg-purple-500"
+  defp category_dot_color("furniture"), do: "bg-emerald-500"
+  defp category_dot_color("it"), do: "bg-cyan-500"
+  defp category_dot_color(_), do: "bg-gray-400"
+
+  # Status dot colors for combobox
+  defp status_dot_color("operational"), do: "bg-green-500"
+  defp status_dot_color("needs_repair"), do: "bg-amber-500"
+  defp status_dot_color("out_of_service"), do: "bg-red-500"
+  defp status_dot_color("decommissioned"), do: "bg-gray-400"
+  defp status_dot_color(_), do: "bg-gray-400"
 
   defp category_icon("hvac"), do: "hero-fire"
   defp category_icon("plumbing"), do: "hero-beaker"
