@@ -41,10 +41,21 @@ defmodule FixlyWeb.Router do
     live_session :admin,
       on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
       layout: {FixlyWeb.Layouts, :app} do
+      live "/", DashboardLive, :index
       live "/tickets", TicketListLive, :index
       live "/tickets/:id", TicketDetailLive, :show
       live "/locations", LocationTreeLive, :index
+      live "/ai-review", AIReviewLive, :index
+      live "/analytics", AnalyticsLive, :index
     end
+  end
+
+  # Export routes (authenticated, non-LiveView)
+  scope "/admin/export", FixlyWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/tickets.csv", ExportController, :tickets_csv
+    get "/analytics.csv", ExportController, :analytics_csv
   end
 
   # Contractor routes (authenticated)
@@ -64,6 +75,17 @@ defmodule FixlyWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :technician,
+      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      layout: {FixlyWeb.Layouts, :app} do
+      live "/tickets", MyTicketsLive, :index
+    end
+  end
+
+  # Resident routes (authenticated)
+  scope "/my", FixlyWeb.Resident do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :resident,
       on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/tickets", MyTicketsLive, :index
