@@ -66,6 +66,6 @@ defmodule Fixly.PubSubBroadcast do
   end
 
   defp broadcast(topic, message) do
-    Phoenix.PubSub.broadcast(@pubsub, topic, message)
+    Phoenix.PubSub.broadcast_from(@pubsub, self(), topic, message)
   end
 end

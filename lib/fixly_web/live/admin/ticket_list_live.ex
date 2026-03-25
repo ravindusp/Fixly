@@ -289,18 +289,22 @@ defmodule FixlyWeb.Admin.TicketListLive do
         <div>
           <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">Assignment</p>
           <div class="space-y-2">
-            <select class="select select-bordered select-sm w-full" phx-change="assign_to_org" name="org_id">
-              <option value="">— Assign to contractor —</option>
-              <option :for={org <- @contractor_orgs} value={org.id} selected={@ticket.assigned_to_org_id == org.id}>
-                {org.name}
-              </option>
-            </select>
-            <select class="select select-bordered select-sm w-full" phx-change="assign_to_user" name="user_id">
-              <option value="">— Assign to technician —</option>
-              <option :for={user <- @internal_users} value={user.id} selected={@ticket.assigned_to_user_id == user.id}>
-                {user.name || user.email}
-              </option>
-            </select>
+            <form phx-change="assign_to_org">
+              <select class="select select-bordered select-sm w-full" name="org_id">
+                <option value="">— Assign to contractor —</option>
+                <option :for={org <- @contractor_orgs} value={org.id} selected={@ticket.assigned_to_org_id == org.id}>
+                  {org.name}
+                </option>
+              </select>
+            </form>
+            <form phx-change="assign_to_user">
+              <select class="select select-bordered select-sm w-full" name="user_id">
+                <option value="">— Assign to technician —</option>
+                <option :for={user <- @internal_users} value={user.id} selected={@ticket.assigned_to_user_id == user.id}>
+                  {user.name || user.email}
+                </option>
+              </select>
+            </form>
           </div>
         </div>
 
@@ -618,6 +622,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
       {:noreply, assign(socket, selected_ticket: nil, comments: [])}
     else
       ticket = Tickets.get_ticket!(id)
+      require Logger
+      Logger.info("SELECT_TICKET #{ticket.reference_number}: org=#{inspect(ticket.assigned_to_org_id)}, user=#{inspect(ticket.assigned_to_user_id)}")
       comments = Tickets.list_comments(id)
       {:noreply, assign(socket, selected_ticket: ticket, comments: comments, comment_body: "")}
     end
@@ -677,34 +683,51 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
   end
 
-  def handle_event("assign_to_org", %{"org_id" => ""}, socket) do
-    {:ok, _} = Tickets.update_ticket(socket.assigns.selected_ticket, %{assigned_to_org_id: nil})
-    updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+  def handle_event("assign_to_org", params, socket) do
+    require Logger
+    org_id = params["org_id"]
+    ticket = socket.assigns.selected_ticket
+    current_org_id = ticket.assigned_to_org_id || ""
+    Logger.info("ASSIGN_TO_ORG: org_id=#{inspect(org_id)}, current=#{inspect(current_org_id)}, ticket=#{ticket.reference_number}")
+
+    # Skip if nothing changed (prevents re-render loops)
+    if org_id == current_org_id do
+      Logger.info("ASSIGN_TO_ORG: SKIPPED (no change)")
+      {:noreply, socket}
+    else
+      if org_id == "" || is_nil(org_id) do
+        {:ok, _} = Tickets.update_ticket(ticket, %{assigned_to_org_id: nil})
+      else
+        {:ok, _} = Tickets.assign_ticket(ticket, %{assigned_to_org_id: org_id})
+        Tickets.log_activity(ticket.id, "assignment", "Assigned to contractor")
+      end
+
+      updated = Tickets.get_ticket!(ticket.id)
+      PubSubBroadcast.broadcast_ticket_updated(updated)
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+    end
   end
 
-  def handle_event("assign_to_org", %{"org_id" => org_id}, socket) do
-    {:ok, _} = Tickets.assign_ticket(socket.assigns.selected_ticket, %{assigned_to_org_id: org_id})
-    Tickets.log_activity(socket.assigns.selected_ticket.id, "assignment", "Assigned to contractor")
-    updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
-  end
+  def handle_event("assign_to_user", params, socket) do
+    user_id = params["user_id"]
+    ticket = socket.assigns.selected_ticket
+    current_user_id = ticket.assigned_to_user_id || ""
 
-  def handle_event("assign_to_user", %{"user_id" => ""}, socket) do
-    {:ok, _} = Tickets.update_ticket(socket.assigns.selected_ticket, %{assigned_to_user_id: nil})
-    updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
-  end
+    # Skip if nothing changed (prevents re-render loops)
+    if user_id == current_user_id do
+      {:noreply, socket}
+    else
+      if user_id == "" || is_nil(user_id) do
+        {:ok, _} = Tickets.update_ticket(ticket, %{assigned_to_user_id: nil})
+      else
+        {:ok, _} = Tickets.assign_ticket(ticket, %{assigned_to_user_id: user_id})
+        Tickets.log_activity(ticket.id, "assignment", "Assigned to technician")
+      end
 
-  def handle_event("assign_to_user", %{"user_id" => user_id}, socket) do
-    {:ok, _} = Tickets.assign_ticket(socket.assigns.selected_ticket, %{assigned_to_user_id: user_id})
-    Tickets.log_activity(socket.assigns.selected_ticket.id, "assignment", "Assigned to technician")
-    updated = Tickets.get_ticket!(socket.assigns.selected_ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+      updated = Tickets.get_ticket!(ticket.id)
+      PubSubBroadcast.broadcast_ticket_updated(updated)
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+    end
   end
 
   def handle_event("add_comment", %{"body" => body}, socket) when byte_size(body) > 0 do
