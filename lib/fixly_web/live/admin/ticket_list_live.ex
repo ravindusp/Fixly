@@ -565,15 +565,25 @@ defmodule FixlyWeb.Admin.TicketListLive do
         </div>
 
         <!-- Navigate to location -->
-        <a
-          :if={@ticket.location}
-          href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@ticket.location.name)}"}
-          target="_blank"
-          class="btn btn-sm btn-outline w-full gap-2"
-        >
-          <.icon name="hero-map-pin" class="size-4" />
-          Navigate to Location
-        </a>
+        <!-- AI + Navigate -->
+        <div class="flex gap-2">
+          <button
+            phx-click="analyze_with_ai"
+            class="btn btn-sm btn-outline btn-accent flex-1 gap-2"
+          >
+            <.icon name="hero-sparkles" class="size-4" />
+            Analyze with AI
+          </button>
+          <a
+            :if={@ticket.location}
+            href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@ticket.location.name)}"}
+            target="_blank"
+            class="btn btn-sm btn-outline flex-1 gap-2"
+          >
+            <.icon name="hero-map-pin" class="size-4" />
+            Navigate
+          </a>
+        </div>
 
         <!-- Comments / Discussion -->
         <div>
@@ -1082,6 +1092,18 @@ defmodule FixlyWeb.Admin.TicketListLive do
        search_query: ""
      )
      |> apply_all_filters()}
+  end
+
+  def handle_event("analyze_with_ai", _, socket) do
+    ticket = socket.assigns.selected_ticket
+
+    case Fixly.Workers.AITicketWorker.enqueue(ticket.id) do
+      {:ok, _job} ->
+        {:noreply, put_flash(socket, :info, "AI analysis queued for #{ticket.reference_number}. Check AI Review when done.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to queue AI analysis")}
+    end
   end
 
   def handle_event("set_priority", %{"priority" => priority}, socket) do

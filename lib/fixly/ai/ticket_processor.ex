@@ -249,21 +249,11 @@ defmodule Fixly.AI.TicketProcessor do
 
   defp process_single_call(ticket, %{name: "suggest_category", args: args}) do
     confidence = args["confidence"] || 0.0
-    category = args["category"]
-
-    if confidence >= 0.9 && is_nil(ticket.category) do
-      # Auto-apply high-confidence category
-      Tickets.update_ticket(ticket, %{category: category})
-      create_suggestion(ticket, "category", args, confidence, "auto_applied")
-    else
-      create_suggestion(ticket, "category", args, confidence, "pending")
-    end
+    create_suggestion(ticket, "category", args, confidence, "pending")
   end
 
   defp process_single_call(ticket, %{name: "suggest_priority", args: args}) do
     confidence = args["confidence"] || 0.0
-
-    # Priority is always a suggestion, never auto-applied (admin's decision)
     create_suggestion(ticket, "priority", args, confidence, "pending")
   end
 
@@ -274,18 +264,7 @@ defmodule Fixly.AI.TicketProcessor do
 
   defp process_single_call(ticket, %{name: "link_to_existing_asset", args: args}) do
     confidence = args["confidence"] || 0.0
-
-    if confidence >= 0.9 do
-      # Auto-link high-confidence matches
-      try do
-        Fixly.Assets.link_ticket_to_asset(ticket.id, args["asset_id"], "ai")
-        create_suggestion(ticket, "link_asset", args, confidence, "auto_applied")
-      rescue
-        _ -> create_suggestion(ticket, "link_asset", args, confidence, "pending")
-      end
-    else
-      create_suggestion(ticket, "link_asset", args, confidence, "pending")
-    end
+    create_suggestion(ticket, "link_asset", args, confidence, "pending")
   end
 
   defp process_single_call(_ticket, %{name: name}) do
