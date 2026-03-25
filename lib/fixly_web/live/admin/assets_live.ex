@@ -9,6 +9,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
   @categories ~w(hvac plumbing electrical structural appliance furniture it other)
   @statuses [
     {"operational", "Operational"},
+    {"needs_attention", "Needs Attention"},
     {"needs_repair", "Needs Repair"},
     {"out_of_service", "Out of Service"},
     {"decommissioned", "Decommissioned"}
@@ -326,7 +327,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
               <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">Change Status</p>
               <div class="flex flex-wrap gap-1.5">
                 <button
-                  :for={{s, label} <- [{"operational", "Operational"}, {"needs_repair", "Needs Repair"}, {"out_of_service", "Out of Service"}, {"decommissioned", "Decommissioned"}]}
+                  :for={{s, label} <- [{"operational", "Operational"}, {"needs_attention", "Needs Attention"}, {"needs_repair", "Needs Repair"}, {"out_of_service", "Out of Service"}, {"decommissioned", "Decommissioned"}]}
                   phx-click="update_asset_status"
                   phx-value-status={s}
                   class={["btn btn-xs", @selected_asset.status == s && "btn-primary", @selected_asset.status != s && "btn-ghost"]}
@@ -338,6 +339,12 @@ defmodule FixlyWeb.Admin.AssetsLive do
 
             <!-- Actions -->
             <div class="flex gap-2">
+              <.link
+                navigate={~p"/admin/assets/#{@selected_asset.id}"}
+                class="btn btn-sm btn-primary btn-outline gap-1.5 flex-1"
+              >
+                <.icon name="hero-arrow-top-right-on-square" class="size-4" /> View Full Details
+              </.link>
               <button
                 phx-click="delete_asset"
                 phx-value-id={@selected_asset.id}
@@ -383,6 +390,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
     <span class={[
       "badge badge-sm font-medium",
       @status == "operational" && "badge-success",
+      @status == "needs_attention" && "badge-info",
       @status == "needs_repair" && "badge-warning",
       @status == "out_of_service" && "badge-error",
       @status == "decommissioned" && "badge-ghost"
@@ -634,6 +642,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
   end
 
   defp status_label("operational"), do: "Operational"
+  defp status_label("needs_attention"), do: "Needs Attention"
   defp status_label("needs_repair"), do: "Needs Repair"
   defp status_label("out_of_service"), do: "Out of Service"
   defp status_label("decommissioned"), do: "Decommissioned"
@@ -651,6 +660,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
 
   # Status dot colors for combobox
   defp status_dot_color("operational"), do: "bg-green-500"
+  defp status_dot_color("needs_attention"), do: "bg-blue-500"
   defp status_dot_color("needs_repair"), do: "bg-amber-500"
   defp status_dot_color("out_of_service"), do: "bg-red-500"
   defp status_dot_color("decommissioned"), do: "bg-gray-400"

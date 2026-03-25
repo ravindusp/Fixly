@@ -5,7 +5,7 @@ defmodule Fixly.Assets.Asset do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(operational needs_repair out_of_service retired)
+  @statuses ~w(operational needs_attention needs_repair out_of_service retired)
   @created_via_options ~w(manual ai qr_scan import)
 
   schema "assets" do

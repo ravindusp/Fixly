@@ -59,11 +59,29 @@ defmodule Fixly.Tickets do
     |> Repo.insert()
   end
 
-  @doc "Admin updates a ticket (status, priority, assignment)."
+  @doc "Admin updates a ticket (status, priority, assignment). Checks linked assets when closing."
   def update_ticket(%Ticket{} = ticket, attrs) do
-    ticket
-    |> Ticket.admin_changeset(attrs)
-    |> Repo.update()
+    old_status = ticket.status
+
+    result =
+      ticket
+      |> Ticket.admin_changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, updated_ticket} ->
+        new_status = updated_ticket.status
+
+        # If ticket status changed to closed/completed, check all linked assets
+        if new_status != old_status and new_status in ["closed", "completed", "reviewed"] do
+          check_linked_assets_for_ticket(updated_ticket.id)
+        end
+
+        {:ok, updated_ticket}
+
+      error ->
+        error
+    end
   end
 
   @doc "Set priority and start SLA timer."
@@ -195,6 +213,44 @@ defmodule Fixly.Tickets do
     })
   end
 
+  @doc """
+  Log a structured ticket event with proper type and metadata.
+  This is the main entry point for logging all ticket activity timeline events.
+  """
+  def log_ticket_event(ticket_id, type, body, metadata \\ %{})
+
+  def log_ticket_event(ticket_id, "created", body, metadata) do
+    log_activity(ticket_id, "created", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "status_change", body, metadata) do
+    log_activity(ticket_id, "status_change", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "assignment", body, metadata) do
+    log_activity(ticket_id, "assignment", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "priority_change", body, metadata) do
+    log_activity(ticket_id, "priority_change", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "category_change", body, metadata) do
+    log_activity(ticket_id, "category_change", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "asset_linked", body, metadata) do
+    log_activity(ticket_id, "asset_linked", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, "sla_breach", body, metadata) do
+    log_activity(ticket_id, "sla_breach", body, metadata)
+  end
+
+  def log_ticket_event(ticket_id, type, body, metadata) do
+    log_activity(ticket_id, type, body, metadata)
+  end
+
   # --- Attachments ---
 
   def create_attachment(attrs) do
@@ -236,4 +292,14 @@ defmodule Fixly.Tickets do
 
   defp maybe_filter_category(query, nil), do: query
   defp maybe_filter_category(query, category), do: where(query, [t], t.category == ^category)
+
+  # Check all linked assets for a ticket and restore operational status if all tickets are resolved.
+  defp check_linked_assets_for_ticket(ticket_id) do
+    alias Fixly.Assets
+    links = Assets.list_links_for_ticket(ticket_id)
+
+    Enum.each(links, fn link ->
+      Assets.check_and_restore_operational(link.asset_id)
+    end)
+  end
 end

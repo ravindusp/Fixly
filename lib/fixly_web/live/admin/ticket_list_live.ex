@@ -713,31 +713,58 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </div>
         </div>
 
-        <!-- Comments / Discussion -->
+        <!-- Activity Timeline / Discussion -->
         <div>
           <div class="flex items-center justify-between mb-3">
             <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">
-              Discussion
+              Activity
               <span :if={@comments != []} class="ml-1 badge badge-xs badge-ghost">{length(@comments)}</span>
             </p>
           </div>
 
-          <div class="space-y-3 mb-3 max-h-64 overflow-y-auto">
-            <div :for={comment <- @comments} class="flex gap-2.5">
-              <div class="w-7 h-7 rounded-full bg-base-200 flex items-center justify-center shrink-0 mt-0.5">
-                <span class="text-[10px] font-semibold text-base-content/50">
-                  {comment_initials(comment)}
-                </span>
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-0.5">
-                  <span class="text-xs font-semibold text-base-content">{comment_author(comment)}</span>
-                  <span class="text-[10px] text-base-content/40">{Calendar.strftime(comment.inserted_at, "%b %d %I:%M %p")}</span>
+          <div class="space-y-2 mb-3 max-h-80 overflow-y-auto">
+            <%= for comment <- @comments do %>
+              <%= if comment.type in ["comment", nil] do %>
+                <%!-- Chat bubble for regular comments --%>
+                <div class="flex gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-base-200 flex items-center justify-center shrink-0 mt-0.5">
+                    <span class="text-[10px] font-semibold text-base-content/50">
+                      {comment_initials(comment)}
+                    </span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-0.5">
+                      <span class="text-xs font-semibold text-base-content">{comment_author(comment)}</span>
+                      <span class="text-[10px] text-base-content/40">{Calendar.strftime(comment.inserted_at, "%b %d %I:%M %p")}</span>
+                    </div>
+                    <div class="bg-base-100 border border-base-300 rounded-lg rounded-tl-none px-3 py-2">
+                      <p class="text-sm text-base-content/70 leading-relaxed">{comment.body}</p>
+                    </div>
+                  </div>
                 </div>
-                <p class="text-sm text-base-content/70 leading-relaxed">{comment.body}</p>
-              </div>
-            </div>
-            <p :if={@comments == []} class="text-xs text-base-content/40 text-center py-3">No comments yet</p>
+              <% else %>
+                <%!-- System event (status_change, assignment, priority_change, etc.) --%>
+                <div class="flex items-center gap-2 py-1.5 px-2">
+                  <div class={[
+                    "w-5 h-5 rounded-full flex items-center justify-center shrink-0",
+                    timeline_event_dot_bg(comment.type)
+                  ]}>
+                    <.icon name={timeline_event_icon(comment.type)} class={["size-2.5", timeline_event_icon_color(comment.type)]} />
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class={[
+                      "text-xs leading-relaxed",
+                      comment.type == "sla_breach" && "text-error font-semibold",
+                      comment.type != "sla_breach" && "text-base-content/50"
+                    ]}>
+                      {timeline_event_text(comment)}
+                    </p>
+                  </div>
+                  <span class="text-[9px] text-base-content/30 shrink-0">{Calendar.strftime(comment.inserted_at, "%b %d %I:%M %p")}</span>
+                </div>
+              <% end %>
+            <% end %>
+            <p :if={@comments == []} class="text-xs text-base-content/40 text-center py-3">No activity yet</p>
           </div>
 
           <form phx-submit="add_comment" class="flex gap-2">
@@ -1055,6 +1082,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   def handle_event("kanban_drop", %{"ticket_id" => ticket_id, "new_status" => new_status}, socket) do
     ticket = Tickets.get_ticket!(ticket_id)
+    user = socket.assigns.current_user
 
     # Handle SLA pause/resume on status change
     case new_status do
@@ -1064,7 +1092,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
     end
 
     {:ok, _} = Tickets.update_ticket(ticket, %{status: new_status})
-    Tickets.log_activity(ticket.id, "status_change", "Status changed to #{status_label(new_status)}", %{from: ticket.status, to: new_status})
+    Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(new_status)}", %{from: ticket.status, to: new_status, changed_by: user.name || user.email})
 
     updated = Tickets.get_ticket!(ticket.id)
     PubSubBroadcast.broadcast_ticket_updated(updated)
@@ -1245,15 +1273,22 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   def handle_event("set_priority", %{"priority" => priority}, socket) do
+    old_priority = socket.assigns.selected_ticket.priority
     {:ok, ticket} = Tickets.set_priority(socket.assigns.selected_ticket, priority)
     ticket = Tickets.get_ticket!(ticket.id)
-    Tickets.log_activity(ticket.id, "system", "Priority set to #{priority}")
+    user = socket.assigns.current_user
+    Tickets.log_ticket_event(ticket.id, "priority_change", "Priority changed to #{priority}", %{
+      from: old_priority,
+      to: priority,
+      changed_by: user.name || user.email
+    })
     PubSubBroadcast.broadcast_ticket_updated(ticket)
     {:noreply, socket |> assign(selected_ticket: ticket) |> reload_tickets()}
   end
 
   def handle_event("update_status", %{"status" => status}, socket) do
     ticket = socket.assigns.selected_ticket
+    user = socket.assigns.current_user
 
     case status do
       "on_hold" -> Tickets.pause_sla(ticket)
@@ -1262,7 +1297,11 @@ defmodule FixlyWeb.Admin.TicketListLive do
     end
 
     {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
-    Tickets.log_activity(ticket.id, "status_change", "Status changed to #{status_label(status)}", %{from: ticket.status, to: status})
+    Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(status)}", %{
+      from: ticket.status,
+      to: status,
+      changed_by: user.name || user.email
+    })
     updated = Tickets.get_ticket!(ticket.id)
     PubSubBroadcast.broadcast_ticket_updated(updated)
     {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
@@ -1273,6 +1312,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
     org_id = params["org_id"]
     ticket = socket.assigns.selected_ticket
     current_org_id = ticket.assigned_to_org_id || ""
+    user = socket.assigns.current_user
     Logger.info("ASSIGN_TO_ORG: org_id=#{inspect(org_id)}, current=#{inspect(current_org_id)}, ticket=#{ticket.reference_number}")
 
     # Skip if nothing changed (prevents re-render loops)
@@ -1284,7 +1324,13 @@ defmodule FixlyWeb.Admin.TicketListLive do
         {:ok, _} = Tickets.update_ticket(ticket, %{assigned_to_org_id: nil})
       else
         {:ok, _} = Tickets.assign_ticket(ticket, %{assigned_to_org_id: org_id})
-        Tickets.log_activity(ticket.id, "assignment", "Assigned to contractor")
+        org_name = Enum.find(socket.assigns.contractor_orgs, fn o -> o.id == org_id end)
+        org_name = if org_name, do: org_name.name, else: "contractor"
+        Tickets.log_ticket_event(ticket.id, "assignment", "Assigned to #{org_name}", %{
+          assigned_to: org_name,
+          assigned_by: user.name || user.email,
+          org_name: org_name
+        })
       end
 
       updated = Tickets.get_ticket!(ticket.id)
@@ -1297,6 +1343,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
     user_id = params["user_id"]
     ticket = socket.assigns.selected_ticket
     current_user_id = ticket.assigned_to_user_id || ""
+    admin_user = socket.assigns.current_user
 
     # Skip if nothing changed (prevents re-render loops)
     if user_id == current_user_id do
@@ -1306,7 +1353,12 @@ defmodule FixlyWeb.Admin.TicketListLive do
         {:ok, _} = Tickets.update_ticket(ticket, %{assigned_to_user_id: nil})
       else
         {:ok, _} = Tickets.assign_ticket(ticket, %{assigned_to_user_id: user_id})
-        Tickets.log_activity(ticket.id, "assignment", "Assigned to technician")
+        tech = Enum.find(socket.assigns.internal_users, fn u -> u.id == user_id end)
+        tech_name = if tech, do: tech.name || tech.email, else: "technician"
+        Tickets.log_ticket_event(ticket.id, "assignment", "Assigned to #{tech_name}", %{
+          assigned_to: tech_name,
+          assigned_by: admin_user.name || admin_user.email
+        })
       end
 
       updated = Tickets.get_ticket!(ticket.id)
@@ -1344,7 +1396,10 @@ defmodule FixlyWeb.Admin.TicketListLive do
     else
       {:ok, _} = Tickets.update_ticket(ticket, %{category: cat_value})
       updated = Tickets.get_ticket!(ticket.id)
-      Tickets.log_activity(ticket.id, "system", "Category set to #{category || "none"}")
+      Tickets.log_ticket_event(ticket.id, "category_change", "Category changed to #{category || "none"}", %{
+        from: ticket.category,
+        to: cat_value
+      })
       PubSubBroadcast.broadcast_ticket_updated(updated)
       {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
     end
@@ -1358,10 +1413,14 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
   def handle_event("link_asset", %{"asset_id" => asset_id}, socket) do
     ticket = socket.assigns.selected_ticket
+    asset = Assets.get_asset!(asset_id)
 
     case Assets.link_ticket_to_asset(ticket.id, asset_id, "manual") do
       {:ok, _link} ->
-        Tickets.log_activity(ticket.id, "system", "Asset linked manually")
+        Tickets.log_ticket_event(ticket.id, "asset_linked", "Asset \"#{asset.name}\" linked to this ticket", %{
+          asset_name: asset.name,
+          asset_id: asset_id
+        })
         updated = Tickets.get_ticket!(ticket.id)
         PubSubBroadcast.broadcast_ticket_updated(updated)
         {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
@@ -1776,4 +1835,84 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   defp suggestion_display_value(_), do: "—"
+
+  # --- Activity timeline helpers ---
+
+  defp timeline_event_icon("status_change"), do: "hero-arrow-path"
+  defp timeline_event_icon("assignment"), do: "hero-user-plus"
+  defp timeline_event_icon("priority_change"), do: "hero-flag"
+  defp timeline_event_icon("category_change"), do: "hero-tag"
+  defp timeline_event_icon("asset_linked"), do: "hero-link"
+  defp timeline_event_icon("sla_breach"), do: "hero-exclamation-triangle"
+  defp timeline_event_icon("created"), do: "hero-plus-circle"
+  defp timeline_event_icon("system"), do: "hero-cog-6-tooth"
+  defp timeline_event_icon(_), do: "hero-information-circle"
+
+  defp timeline_event_dot_bg("status_change"), do: "bg-info/10"
+  defp timeline_event_dot_bg("assignment"), do: "bg-primary/10"
+  defp timeline_event_dot_bg("priority_change"), do: "bg-warning/10"
+  defp timeline_event_dot_bg("sla_breach"), do: "bg-error/10"
+  defp timeline_event_dot_bg("asset_linked"), do: "bg-success/10"
+  defp timeline_event_dot_bg("created"), do: "bg-success/10"
+  defp timeline_event_dot_bg(_), do: "bg-base-200"
+
+  defp timeline_event_icon_color("status_change"), do: "text-info"
+  defp timeline_event_icon_color("assignment"), do: "text-primary"
+  defp timeline_event_icon_color("priority_change"), do: "text-warning"
+  defp timeline_event_icon_color("sla_breach"), do: "text-error"
+  defp timeline_event_icon_color("asset_linked"), do: "text-success"
+  defp timeline_event_icon_color("created"), do: "text-success"
+  defp timeline_event_icon_color(_), do: "text-base-content/40"
+
+  defp timeline_event_text(%{type: "status_change", metadata: %{"from" => from, "to" => to}}) do
+    "Status changed from #{status_label(from)} to #{status_label(to)}"
+  end
+
+  defp timeline_event_text(%{type: "status_change", body: body}) do
+    body
+  end
+
+  defp timeline_event_text(%{type: "assignment", metadata: %{"assigned_to" => name}}) do
+    "Assigned to #{name}"
+  end
+
+  defp timeline_event_text(%{type: "assignment", body: body}) do
+    body
+  end
+
+  defp timeline_event_text(%{type: "priority_change", metadata: %{"to" => to}}) do
+    "Priority changed to #{String.capitalize(to)}"
+  end
+
+  defp timeline_event_text(%{type: "priority_change", body: body}) do
+    body
+  end
+
+  defp timeline_event_text(%{type: "category_change", metadata: %{"to" => to}}) do
+    "Category changed to #{String.capitalize(to)}"
+  end
+
+  defp timeline_event_text(%{type: "asset_linked", metadata: %{"asset_name" => name}}) do
+    "Asset \"#{name}\" linked to this ticket"
+  end
+
+  defp timeline_event_text(%{type: "asset_linked", body: body}) do
+    body
+  end
+
+  defp timeline_event_text(%{type: "sla_breach", metadata: %{"deadline" => deadline}}) do
+    "SLA deadline breached (#{deadline})"
+  end
+
+  defp timeline_event_text(%{type: "sla_breach"}) do
+    "SLA deadline breached"
+  end
+
+  defp timeline_event_text(%{type: "created", body: body}) do
+    body
+  end
+
+  defp timeline_event_text(%{body: body}) do
+    body
+  end
 end

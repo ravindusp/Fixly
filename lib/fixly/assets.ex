@@ -4,6 +4,7 @@ defmodule Fixly.Assets do
   import Ecto.Query
   alias Fixly.Repo
   alias Fixly.Assets.{Asset, TicketAssetLink}
+  alias Fixly.Tickets.Ticket
 
   # --- Assets ---
 
@@ -64,13 +65,75 @@ defmodule Fixly.Assets do
     |> Repo.insert()
   end
 
-  @doc "Link a ticket to an asset by IDs with a linked_by source."
+  @doc "Link a ticket to an asset by IDs with a linked_by source. Also updates asset status."
   def link_ticket_to_asset(ticket_id, asset_id, linked_by) do
-    link_ticket_to_asset(%{
+    case link_ticket_to_asset(%{
       ticket_id: ticket_id,
       asset_id: asset_id,
       linked_by: linked_by
-    })
+    }) do
+      {:ok, link} ->
+        # Auto-update asset status to needs_attention if currently operational
+        asset = get_asset!(asset_id)
+        if asset.status == "operational" do
+          update_asset(asset, %{status: "needs_attention"})
+        end
+        # Update the ticket count
+        update_asset_ticket_count(asset_id)
+        {:ok, link}
+
+      error ->
+        error
+    end
+  end
+
+  @doc "Recalculate ticket_count for an asset from actual linked tickets."
+  def update_asset_ticket_count(asset_id) do
+    count =
+      TicketAssetLink
+      |> where([l], l.asset_id == ^asset_id)
+      |> Repo.aggregate(:count, :id)
+
+    Asset
+    |> where([a], a.id == ^asset_id)
+    |> Repo.update_all(set: [ticket_count: count])
+
+    :ok
+  end
+
+  @doc "Check if all linked tickets are closed/completed, and if so, restore asset to operational."
+  def check_and_restore_operational(asset_id) do
+    asset = get_asset!(asset_id)
+
+    # Only restore if asset is in needs_attention or needs_repair
+    if asset.status in ["needs_attention", "needs_repair"] do
+      # Get all linked tickets
+      linked_tickets = list_tickets_for_asset(asset_id)
+
+      # Check if all are closed or completed
+      all_resolved =
+        linked_tickets != [] &&
+          Enum.all?(linked_tickets, fn t -> t.status in ["closed", "completed", "reviewed"] end)
+
+      if all_resolved do
+        update_asset(asset, %{status: "operational"})
+      else
+        {:ok, asset}
+      end
+    else
+      {:ok, asset}
+    end
+  end
+
+  @doc "List all tickets linked to an asset."
+  def list_tickets_for_asset(asset_id) do
+    TicketAssetLink
+    |> where([tal], tal.asset_id == ^asset_id)
+    |> join(:inner, [tal], t in Ticket, on: tal.ticket_id == t.id)
+    |> select([tal, t], t)
+    |> preload([tal, t], [:location, :assigned_to_user, :assigned_to_org])
+    |> order_by([tal, t], desc: t.inserted_at)
+    |> Repo.all()
   end
 
   @doc "List asset links for a ticket."
@@ -94,5 +157,25 @@ defmodule Fixly.Assets do
     TicketAssetLink
     |> where([l], l.ticket_id == ^ticket_id and l.asset_id == ^asset_id)
     |> Repo.delete_all()
+  end
+
+  @doc "Get activity log for an asset (ticket comments from all linked tickets + system events)."
+  def list_activity_for_asset(asset_id) do
+    # Get all ticket IDs linked to this asset
+    ticket_ids =
+      TicketAssetLink
+      |> where([l], l.asset_id == ^asset_id)
+      |> select([l], l.ticket_id)
+      |> Repo.all()
+
+    if ticket_ids == [] do
+      []
+    else
+      Fixly.Tickets.TicketComment
+      |> where([c], c.ticket_id in ^ticket_ids)
+      |> order_by([c], desc: c.inserted_at)
+      |> preload(:user)
+      |> Repo.all()
+    end
   end
 end

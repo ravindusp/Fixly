@@ -5,7 +5,7 @@ defmodule Fixly.Tickets.TicketComment do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @types ~w(comment status_change assignment system)
+  @types ~w(comment status_change assignment system created priority_change category_change asset_linked sla_breach)
 
   schema "ticket_comments" do
     field :body, :string
