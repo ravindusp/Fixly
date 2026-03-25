@@ -854,11 +854,19 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   defp priority_dot_color(_), do: "bg-base-content/20"
 
   defp location_breadcrumb(location) do
-    if location.path && location.path != "" do
-      parts = String.split(location.path, "/", trim: true)
-      Enum.join(parts ++ [location.name], " > ")
-    else
-      location.name
+    ancestors = build_ancestor_names(location, [])
+    Enum.join(ancestors, " > ")
+  end
+
+  defp build_ancestor_names(nil, acc), do: acc
+
+  defp build_ancestor_names(location, acc) do
+    # Preload parent if not already loaded
+    location = Fixly.Repo.preload(location, :parent)
+
+    case location.parent do
+      nil -> [location.name | acc]
+      parent -> build_ancestor_names(parent, [location.name | acc])
     end
   end
 
