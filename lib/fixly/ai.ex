@@ -56,6 +56,14 @@ defmodule Fixly.AI do
     |> Repo.update()
   end
 
+  @doc "List pending AI suggestions for a specific ticket, ordered by confidence."
+  def list_suggestions_for_ticket(ticket_id) do
+    Suggestion
+    |> where([s], s.ticket_id == ^ticket_id and s.status == "pending")
+    |> order_by([s], desc: s.confidence)
+    |> Repo.all()
+  end
+
   @doc "Bulk approve all suggestions above a confidence threshold."
   def bulk_approve_high_confidence(org_id, threshold \\ 0.9, user_id) do
     now = DateTime.utc_now(:second)

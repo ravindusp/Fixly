@@ -16,6 +16,23 @@ import Config
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
+# Gemini AI API key — reads from env var, falls back to .env file
+gemini_key = System.get_env("GEMINI_API_KEY") ||
+  (File.exists?(".env") &&
+    ".env"
+    |> File.read!()
+    |> String.split("\n")
+    |> Enum.find_value(fn line ->
+      case String.split(line, "=", parts: 2) do
+        ["GEMINI_API_KEY", val] -> String.trim(val)
+        _ -> nil
+      end
+    end))
+
+if gemini_key do
+  config :fixly, :gemini_api_key, gemini_key
+end
+
 if System.get_env("PHX_SERVER") do
   config :fixly, FixlyWeb.Endpoint, server: true
 end

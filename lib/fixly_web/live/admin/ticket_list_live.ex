@@ -5,6 +5,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
   alias Fixly.Tickets.Ticket
   alias Fixly.Accounts
   alias Fixly.Organizations
+  alias Fixly.Assets
+  alias Fixly.AI
   alias Fixly.PubSubBroadcast
 
   @impl true
@@ -64,6 +66,9 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:selected_ticket, nil)
       |> assign(:comments, [])
       |> assign(:comment_body, "")
+      |> assign(:ai_suggestions, [])
+      |> assign(:ai_loading, false)
+      |> assign(:location_assets, [])
       |> assign(:org_id, org_id)
       |> assign(:internal_users, internal_users)
       |> assign(:contractor_orgs, contractor_orgs)
@@ -107,6 +112,18 @@ defmodule FixlyWeb.Admin.TicketListLive do
         assign(socket, :comments, comments)
       else
         socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info(:refresh_ai_suggestions, socket) do
+    socket =
+      if socket.assigns.selected_ticket do
+        suggestions = AI.list_suggestions_for_ticket(socket.assigns.selected_ticket.id)
+        assign(socket, ai_suggestions: suggestions, ai_loading: false)
+      else
+        assign(socket, ai_loading: false)
       end
 
     {:noreply, socket}
@@ -410,6 +427,9 @@ defmodule FixlyWeb.Admin.TicketListLive do
         comment_body={@comment_body}
         internal_users={@internal_users}
         contractor_orgs={@contractor_orgs}
+        ai_suggestions={@ai_suggestions}
+        ai_loading={@ai_loading}
+        location_assets={@location_assets}
       />
     </div>
     """
@@ -525,6 +545,44 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </div>
         </div>
 
+        <!-- Category selector -->
+        <div>
+          <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">Category</p>
+          <form phx-change="set_category">
+            <select name="category" class="select select-sm select-bordered w-full">
+              <option value="">-- No category --</option>
+              <option
+                :for={cat <- ["hvac", "plumbing", "electrical", "structural", "appliance", "furniture", "it", "other"]}
+                value={cat}
+                selected={@ticket.category == cat}
+              >
+                {String.capitalize(cat)}
+              </option>
+            </select>
+          </form>
+        </div>
+
+        <!-- Linked Asset -->
+        <div>
+          <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">Linked Asset</p>
+          <%= if @ticket.location do %>
+            <form phx-change="link_asset">
+              <select name="asset_id" class="select select-sm select-bordered w-full">
+                <option value="">-- Link to asset --</option>
+                <option
+                  :for={asset <- @location_assets}
+                  value={asset.id}
+                  selected={Enum.any?(Fixly.Assets.list_links_for_ticket(@ticket.id), fn l -> l.asset_id == asset.id end)}
+                >
+                  {asset.name}
+                </option>
+              </select>
+            </form>
+          <% else %>
+            <p class="text-xs text-base-content/40 italic">No location set — cannot link assets</p>
+          <% end %>
+        </div>
+
         <!-- Assignment -->
         <div>
           <p class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">Assignment</p>
@@ -583,6 +641,76 @@ defmodule FixlyWeb.Admin.TicketListLive do
             <.icon name="hero-map-pin" class="size-4" />
             Navigate
           </a>
+        </div>
+
+        <!-- AI Loading indicator -->
+        <div :if={@ai_loading} class="flex items-center gap-2 px-3 py-2 bg-accent/5 border border-accent/20 rounded-lg">
+          <span class="loading loading-spinner loading-xs text-accent"></span>
+          <span class="text-xs text-accent">Analyzing ticket with AI...</span>
+        </div>
+
+        <!-- AI Suggestions -->
+        <div :if={@ai_suggestions != []} class="space-y-3">
+          <p class="text-xs font-semibold text-accent uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <.icon name="hero-sparkles" class="size-3.5" /> AI Suggestions
+          </p>
+
+          <div :for={suggestion <- @ai_suggestions} class="bg-accent/5 border border-accent/20 rounded-lg p-3 space-y-2">
+            <!-- Type badge + confidence -->
+            <div class="flex items-center justify-between">
+              <span class={[
+                "badge badge-sm font-medium",
+                suggestion.suggestion_type in ["category", "priority"] && "badge-info badge-outline",
+                suggestion.suggestion_type == "create_asset" && "badge-success badge-outline",
+                suggestion.suggestion_type == "link_asset" && "badge-warning badge-outline"
+              ]}>
+                {suggestion_type_label(suggestion.suggestion_type)}
+              </span>
+              <div class="flex items-center gap-1.5">
+                <div class="w-16 h-1.5 rounded-full bg-base-300 overflow-hidden">
+                  <div
+                    class={[
+                      "h-full rounded-full",
+                      suggestion.confidence && suggestion.confidence >= 0.8 && "bg-success",
+                      suggestion.confidence && suggestion.confidence >= 0.6 && suggestion.confidence < 0.8 && "bg-warning",
+                      (is_nil(suggestion.confidence) || suggestion.confidence < 0.6) && "bg-error"
+                    ]}
+                    style={"width: #{(suggestion.confidence || 0) * 100}%"}
+                  >
+                  </div>
+                </div>
+                <span class="text-[10px] text-base-content/50">{round((suggestion.confidence || 0) * 100)}%</span>
+              </div>
+            </div>
+
+            <!-- Suggested value -->
+            <div class="text-sm font-semibold text-base-content">
+              {suggestion_display_value(suggestion)}
+            </div>
+
+            <!-- Reasoning -->
+            <p :if={suggestion.reasoning} class="text-xs text-base-content/60 leading-relaxed">
+              {suggestion.reasoning}
+            </p>
+
+            <!-- Action buttons -->
+            <div class="flex gap-1.5 pt-1">
+              <button
+                phx-click="apply_suggestion"
+                phx-value-id={suggestion.id}
+                class="btn btn-xs btn-success btn-outline gap-1"
+              >
+                <.icon name="hero-check" class="size-3" /> Apply
+              </button>
+              <button
+                phx-click="dismiss_suggestion"
+                phx-value-id={suggestion.id}
+                class="btn btn-xs btn-ghost gap-1 text-base-content/50"
+              >
+                <.icon name="hero-x-mark" class="size-3" /> Dismiss
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Comments / Discussion -->
@@ -891,18 +1019,20 @@ defmodule FixlyWeb.Admin.TicketListLive do
   def handle_event("select_ticket", %{"id" => id}, socket) do
     # If clicking the same ticket, close the panel
     if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == id do
-      {:noreply, assign(socket, selected_ticket: nil, comments: [])}
+      {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [])}
     else
       ticket = Tickets.get_ticket!(id)
       require Logger
       Logger.info("SELECT_TICKET #{ticket.reference_number}: org=#{inspect(ticket.assigned_to_org_id)}, user=#{inspect(ticket.assigned_to_user_id)}")
       comments = Tickets.list_comments(id)
-      {:noreply, assign(socket, selected_ticket: ticket, comments: comments, comment_body: "")}
+      ai_suggestions = AI.list_suggestions_for_ticket(id)
+      location_assets = if ticket.location_id, do: Assets.list_assets_for_location(ticket.location_id), else: []
+      {:noreply, assign(socket, selected_ticket: ticket, comments: comments, comment_body: "", ai_suggestions: ai_suggestions, location_assets: location_assets)}
     end
   end
 
   def handle_event("close_panel", _, socket) do
-    {:noreply, assign(socket, selected_ticket: nil, comments: [])}
+    {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [])}
   end
 
   # --- Search ---
@@ -1099,7 +1229,15 @@ defmodule FixlyWeb.Admin.TicketListLive do
 
     case Fixly.Workers.AITicketWorker.enqueue(ticket.id) do
       {:ok, _job} ->
-        {:noreply, put_flash(socket, :info, "AI analysis queued for #{ticket.reference_number}. Check AI Review when done.")}
+        # Schedule periodic checks to pick up suggestions when the AI job completes
+        Process.send_after(self(), :refresh_ai_suggestions, 3_000)
+        Process.send_after(self(), :refresh_ai_suggestions, 8_000)
+        Process.send_after(self(), :refresh_ai_suggestions, 15_000)
+
+        {:noreply,
+         socket
+         |> assign(:ai_loading, true)
+         |> put_flash(:info, "AI analysis queued for #{ticket.reference_number}.")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to queue AI analysis")}
@@ -1193,6 +1331,128 @@ defmodule FixlyWeb.Admin.TicketListLive do
   end
 
   def handle_event("add_comment", _, socket), do: {:noreply, socket}
+
+  # --- Category ---
+
+  def handle_event("set_category", %{"category" => category}, socket) do
+    ticket = socket.assigns.selected_ticket
+    cat_value = if category == "", do: nil, else: category
+
+    # Skip if nothing changed
+    if cat_value == ticket.category do
+      {:noreply, socket}
+    else
+      {:ok, _} = Tickets.update_ticket(ticket, %{category: cat_value})
+      updated = Tickets.get_ticket!(ticket.id)
+      Tickets.log_activity(ticket.id, "system", "Category set to #{category || "none"}")
+      PubSubBroadcast.broadcast_ticket_updated(updated)
+      {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+    end
+  end
+
+  # --- Asset linking ---
+
+  def handle_event("link_asset", %{"asset_id" => ""}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("link_asset", %{"asset_id" => asset_id}, socket) do
+    ticket = socket.assigns.selected_ticket
+
+    case Assets.link_ticket_to_asset(ticket.id, asset_id, "manual") do
+      {:ok, _link} ->
+        Tickets.log_activity(ticket.id, "system", "Asset linked manually")
+        updated = Tickets.get_ticket!(ticket.id)
+        PubSubBroadcast.broadcast_ticket_updated(updated)
+        {:noreply, socket |> assign(selected_ticket: updated) |> reload_tickets()}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to link asset (may already be linked)")}
+    end
+  end
+
+  # --- AI Suggestion actions ---
+
+  def handle_event("apply_suggestion", %{"id" => suggestion_id}, socket) do
+    suggestion = AI.get_suggestion!(suggestion_id)
+    user = socket.assigns.current_user
+    ticket = socket.assigns.selected_ticket
+
+    result =
+      case suggestion.suggestion_type do
+        "category" ->
+          cat = suggestion.suggested_data["category"]
+          {:ok, _} = Tickets.update_ticket(ticket, %{category: cat})
+          Tickets.log_activity(ticket.id, "system", "Category set to #{cat} (AI suggestion)")
+          :ok
+
+        "priority" ->
+          priority = suggestion.suggested_data["priority"]
+          {:ok, _} = Tickets.set_priority(ticket, priority)
+          Tickets.log_activity(ticket.id, "system", "Priority set to #{priority} (AI suggestion)")
+          :ok
+
+        "create_asset" ->
+          data = suggestion.suggested_data
+          asset_attrs = %{
+            name: data["name"],
+            category: data["category"],
+            location_id: ticket.location_id,
+            organization_id: ticket.organization_id,
+            created_via: "ai",
+            ai_confidence: suggestion.confidence
+          }
+
+          case Assets.create_asset(asset_attrs) do
+            {:ok, asset} ->
+              Assets.link_ticket_to_asset(ticket.id, asset.id, "ai")
+              Tickets.log_activity(ticket.id, "system", "Asset '#{asset.name}' created and linked (AI suggestion)")
+              :ok
+
+            {:error, _} ->
+              :error
+          end
+
+        "link_asset" ->
+          asset_id = suggestion.suggested_data["asset_id"]
+
+          case Assets.link_ticket_to_asset(ticket.id, asset_id, "ai") do
+            {:ok, _} ->
+              Tickets.log_activity(ticket.id, "system", "Asset linked (AI suggestion)")
+              :ok
+
+            {:error, _} ->
+              :error
+          end
+      end
+
+    case result do
+      :ok ->
+        AI.approve_suggestion(suggestion, user.id)
+        updated = Tickets.get_ticket!(ticket.id)
+        suggestions = AI.list_suggestions_for_ticket(ticket.id)
+        location_assets = if updated.location_id, do: Assets.list_assets_for_location(updated.location_id), else: []
+        PubSubBroadcast.broadcast_ticket_updated(updated)
+
+        {:noreply,
+         socket
+         |> assign(selected_ticket: updated, ai_suggestions: suggestions, location_assets: location_assets)
+         |> reload_tickets()
+         |> put_flash(:info, "AI suggestion applied")}
+
+      :error ->
+        {:noreply, put_flash(socket, :error, "Failed to apply suggestion")}
+    end
+  end
+
+  def handle_event("dismiss_suggestion", %{"id" => suggestion_id}, socket) do
+    suggestion = AI.get_suggestion!(suggestion_id)
+    user = socket.assigns.current_user
+    AI.reject_suggestion(suggestion, user.id)
+
+    suggestions = AI.list_suggestions_for_ticket(socket.assigns.selected_ticket.id)
+    {:noreply, assign(socket, :ai_suggestions, suggestions)}
+  end
 
   # ==========================================
   # HELPERS
@@ -1488,4 +1748,32 @@ defmodule FixlyWeb.Admin.TicketListLive do
       a -> a.name
     end
   end
+
+  # --- AI Suggestion helpers ---
+
+  defp suggestion_type_label("category"), do: "Category"
+  defp suggestion_type_label("priority"), do: "Priority"
+  defp suggestion_type_label("create_asset"), do: "New Asset"
+  defp suggestion_type_label("link_asset"), do: "Link Asset"
+  defp suggestion_type_label(other), do: String.capitalize(other)
+
+  defp suggestion_display_value(%{suggestion_type: "category", suggested_data: data}) do
+    String.capitalize(data["category"] || "unknown")
+  end
+
+  defp suggestion_display_value(%{suggestion_type: "priority", suggested_data: data}) do
+    String.capitalize(data["priority"] || "unknown")
+  end
+
+  defp suggestion_display_value(%{suggestion_type: "create_asset", suggested_data: data}) do
+    name = data["name"] || "Unknown"
+    cat = data["category"]
+    if cat, do: "#{name} (#{cat})", else: name
+  end
+
+  defp suggestion_display_value(%{suggestion_type: "link_asset", suggested_data: data}) do
+    data["asset_name"] || "Asset #{String.slice(data["asset_id"] || "", 0..7)}"
+  end
+
+  defp suggestion_display_value(_), do: "—"
 end

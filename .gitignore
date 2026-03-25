@@ -36,3 +36,7 @@ npm-debug.log
 /assets/node_modules/
 
 .DS_Store
+
+# Environment variables / secrets
+.env
+.env.*
