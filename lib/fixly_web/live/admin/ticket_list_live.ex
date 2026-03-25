@@ -50,6 +50,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:filter_category, "all")
       |> assign(:filter_date_from, nil)
       |> assign(:filter_date_to, nil)
+      |> assign(:show_date_picker, false)
+      |> assign(:calendar_month, Date.utc_today())
       |> assign(:filter_assignee_ids, MapSet.new())
       |> assign(:filter_location_id, "all")
       |> assign(:show_filters, false)
@@ -172,8 +174,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
             <.filter_chip :if={@filter_status != "all"} label={"Status: #{status_label(@filter_status)}"} event="clear_filter" value="status" />
             <.filter_chip :if={@filter_priority != "all"} label={"Priority: #{String.capitalize(@filter_priority)}"} event="clear_filter" value="priority" />
             <.filter_chip :if={@filter_category != "all"} label={"Category: #{String.capitalize(@filter_category)}"} event="clear_filter" value="category" />
-            <.filter_chip :if={@filter_date_from} label={"From: #{@filter_date_from}"} event="clear_filter" value="date_from" />
-            <.filter_chip :if={@filter_date_to} label={"To: #{@filter_date_to}"} event="clear_filter" value="date_to" />
+            <.filter_chip :if={@filter_date_from || @filter_date_to} label={date_range_label(@filter_date_from, @filter_date_to)} event="clear_filter" value="date_range" />
             <.filter_chip :if={@filter_location_id != "all"} label={"Location"} event="clear_filter" value="location" />
             <.filter_chip
               :for={aid <- MapSet.to_list(@filter_assignee_ids)}
@@ -236,30 +237,88 @@ defmodule FixlyWeb.Admin.TicketListLive do
                 </form>
               </div>
 
-              <!-- Date from -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date From</label>
-                <form phx-change="set_filter_date_from">
-                  <input
-                    type="date"
-                    name="date"
-                    value={@filter_date_from}
-                    class="input input-sm input-bordered w-full"
-                  />
-                </form>
-              </div>
+              <!-- Date Range -->
+              <div class="col-span-2 relative">
+                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date Range</label>
+                <button
+                  type="button"
+                  phx-click="toggle_date_picker"
+                  class="btn btn-sm btn-ghost border border-base-300 w-full justify-start gap-2 font-normal"
+                >
+                  <.icon name="hero-calendar-days" class="size-4 text-base-content/40" />
+                  <span :if={!@filter_date_from && !@filter_date_to} class="text-base-content/40">Select date range...</span>
+                  <span :if={@filter_date_from || @filter_date_to} class="text-base-content">
+                    {format_date_display(@filter_date_from)} — {format_date_display(@filter_date_to)}
+                  </span>
+                </button>
 
-              <!-- Date to -->
-              <div>
-                <label class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-1.5 block">Date To</label>
-                <form phx-change="set_filter_date_to">
-                  <input
-                    type="date"
-                    name="date"
-                    value={@filter_date_to}
-                    class="input input-sm input-bordered w-full"
-                  />
-                </form>
+                <!-- Date picker dropdown -->
+                <div :if={@show_date_picker} class="absolute z-30 mt-1 bg-base-100 border border-base-300 rounded-xl shadow-xl p-0 w-auto">
+                  <div class="flex">
+                    <!-- Presets sidebar -->
+                    <div class="border-r border-base-300 py-2 w-36">
+                      <button :for={{label, preset} <- date_presets()} phx-click="date_preset" phx-value-preset={preset} class="block w-full text-left px-4 py-2 text-sm text-base-content/70 hover:bg-primary/10 hover:text-primary transition-colors">
+                        {label}
+                      </button>
+                    </div>
+
+                    <!-- Calendar -->
+                    <div class="p-4 w-72">
+                      <!-- Month nav -->
+                      <div class="flex items-center justify-between mb-3">
+                        <button phx-click="calendar_prev_month" class="btn btn-ghost btn-xs btn-square">
+                          <.icon name="hero-chevron-left" class="size-4" />
+                        </button>
+                        <span class="text-sm font-semibold text-base-content">
+                          {Calendar.strftime(@calendar_month, "%B %Y")}
+                        </span>
+                        <button phx-click="calendar_next_month" class="btn btn-ghost btn-xs btn-square">
+                          <.icon name="hero-chevron-right" class="size-4" />
+                        </button>
+                      </div>
+
+                      <!-- Day headers -->
+                      <div class="grid grid-cols-7 gap-0 mb-1">
+                        <span :for={day <- ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]} class="text-center text-[10px] font-semibold text-base-content/40 py-1">
+                          {day}
+                        </span>
+                      </div>
+
+                      <!-- Calendar grid -->
+                      <div class="grid grid-cols-7 gap-0">
+                        <button
+                          :for={date <- calendar_days(@calendar_month)}
+                          type="button"
+                          phx-click="select_calendar_date"
+                          phx-value-date={Date.to_iso8601(date)}
+                          class={[
+                            "w-9 h-9 text-sm rounded-lg flex items-center justify-center transition-colors",
+                            date.month != @calendar_month.month && "text-base-content/20",
+                            date.month == @calendar_month.month && "text-base-content hover:bg-primary/10",
+                            date == Date.utc_today() && "font-bold ring-1 ring-primary/30",
+                            in_selected_range?(date, @filter_date_from, @filter_date_to) && "bg-primary/10",
+                            is_range_endpoint?(date, @filter_date_from, @filter_date_to) && "!bg-primary !text-primary-content font-semibold"
+                          ]}
+                        >
+                          {date.day}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Footer -->
+                  <div class="flex items-center justify-between px-4 py-2.5 border-t border-base-300 bg-base-200/30 rounded-b-xl">
+                    <div class="text-xs text-base-content/50">
+                      <span :if={@filter_date_from}>{@filter_date_from}</span>
+                      <span :if={@filter_date_from && @filter_date_to}> — {@filter_date_to}</span>
+                      <span :if={@filter_date_from && !@filter_date_to} class="text-primary animate-pulse"> pick end date</span>
+                    </div>
+                    <div class="flex gap-1.5">
+                      <button phx-click="clear_date_range" class="btn btn-xs btn-ghost">Clear</button>
+                      <button phx-click="toggle_date_picker" class="btn btn-xs btn-primary">Done</button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <!-- Assigned To (multi-select combobox) -->
@@ -905,20 +964,73 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, socket |> assign(:filter_location_id, location_id) |> apply_all_filters()}
   end
 
-  def handle_event("set_filter_date_from", %{"date" => ""}, socket) do
-    {:noreply, socket |> assign(:filter_date_from, nil) |> apply_all_filters()}
+  # --- Date Range Picker ---
+
+  def handle_event("toggle_date_picker", _, socket) do
+    {:noreply, assign(socket, :show_date_picker, !socket.assigns.show_date_picker)}
   end
 
-  def handle_event("set_filter_date_from", %{"date" => date}, socket) do
-    {:noreply, socket |> assign(:filter_date_from, date) |> apply_all_filters()}
+  def handle_event("calendar_prev_month", _, socket) do
+    new_month = Date.add(socket.assigns.calendar_month, -30)
+    new_month = Date.new!(new_month.year, new_month.month, 1)
+    {:noreply, assign(socket, :calendar_month, new_month)}
   end
 
-  def handle_event("set_filter_date_to", %{"date" => ""}, socket) do
-    {:noreply, socket |> assign(:filter_date_to, nil) |> apply_all_filters()}
+  def handle_event("calendar_next_month", _, socket) do
+    days_in_month = Date.days_in_month(socket.assigns.calendar_month)
+    new_month = Date.add(socket.assigns.calendar_month, days_in_month)
+    new_month = Date.new!(new_month.year, new_month.month, 1)
+    {:noreply, assign(socket, :calendar_month, new_month)}
   end
 
-  def handle_event("set_filter_date_to", %{"date" => date}, socket) do
-    {:noreply, socket |> assign(:filter_date_to, date) |> apply_all_filters()}
+  def handle_event("select_calendar_date", %{"date" => date_str}, socket) do
+    {:ok, date} = Date.from_iso8601(date_str)
+    date_s = Date.to_iso8601(date)
+
+    {from, to} =
+      cond do
+        # No start date yet — set as start
+        is_nil(socket.assigns.filter_date_from) ->
+          {date_s, nil}
+
+        # Start date set but no end — set as end (swap if before start)
+        is_nil(socket.assigns.filter_date_to) ->
+          {:ok, start} = Date.from_iso8601(socket.assigns.filter_date_from)
+          if Date.compare(date, start) == :lt do
+            {date_s, socket.assigns.filter_date_from}
+          else
+            {socket.assigns.filter_date_from, date_s}
+          end
+
+        # Both set — start new selection
+        true ->
+          {date_s, nil}
+      end
+
+    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to) |> apply_all_filters()}
+  end
+
+  def handle_event("date_preset", %{"preset" => preset}, socket) do
+    today = Date.utc_today()
+
+    {from, to} =
+      case preset do
+        "today" -> {Date.to_iso8601(today), Date.to_iso8601(today)}
+        "7d" -> {Date.to_iso8601(Date.add(today, -7)), Date.to_iso8601(today)}
+        "14d" -> {Date.to_iso8601(Date.add(today, -14)), Date.to_iso8601(today)}
+        "30d" -> {Date.to_iso8601(Date.add(today, -30)), Date.to_iso8601(today)}
+        "90d" -> {Date.to_iso8601(Date.add(today, -90)), Date.to_iso8601(today)}
+        "mtd" -> {Date.to_iso8601(Date.new!(today.year, today.month, 1)), Date.to_iso8601(today)}
+        "ytd" -> {Date.to_iso8601(Date.new!(today.year, 1, 1)), Date.to_iso8601(today)}
+        "all" -> {nil, nil}
+        _ -> {nil, nil}
+      end
+
+    {:noreply, socket |> assign(filter_date_from: from, filter_date_to: to, show_date_picker: false) |> apply_all_filters()}
+  end
+
+  def handle_event("clear_date_range", _, socket) do
+    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> apply_all_filters()}
   end
 
   def handle_event("assignee_search", %{"query" => query}, socket) do
@@ -951,12 +1063,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:noreply, socket |> assign(:filter_location_id, "all") |> apply_all_filters()}
   end
 
-  def handle_event("clear_filter", %{"id" => "date_from"}, socket) do
-    {:noreply, socket |> assign(:filter_date_from, nil) |> apply_all_filters()}
-  end
-
-  def handle_event("clear_filter", %{"id" => "date_to"}, socket) do
-    {:noreply, socket |> assign(:filter_date_to, nil) |> apply_all_filters()}
+  def handle_event("clear_filter", %{"id" => "date_range"}, socket) do
+    {:noreply, socket |> assign(filter_date_from: nil, filter_date_to: nil) |> apply_all_filters()}
   end
 
   def handle_event("clear_all_filters", _, socket) do
@@ -1281,9 +1389,66 @@ defmodule FixlyWeb.Admin.TicketListLive do
     count = if assigns.filter_priority != "all", do: count + 1, else: count
     count = if assigns.filter_category != "all", do: count + 1, else: count
     count = if assigns.filter_location_id != "all", do: count + 1, else: count
-    count = if assigns.filter_date_from, do: count + 1, else: count
-    count = if assigns.filter_date_to, do: count + 1, else: count
+    count = if assigns.filter_date_from || assigns.filter_date_to, do: count + 1, else: count
     count + MapSet.size(assigns.filter_assignee_ids)
+  end
+
+  # --- Calendar helpers ---
+
+  defp date_presets do
+    [
+      {"Today", "today"},
+      {"Last 7 days", "7d"},
+      {"Last 14 days", "14d"},
+      {"Last 30 days", "30d"},
+      {"Last 90 days", "90d"},
+      {"Month to date", "mtd"},
+      {"Year to date", "ytd"},
+      {"All time", "all"}
+    ]
+  end
+
+  defp calendar_days(month) do
+    first = Date.new!(month.year, month.month, 1)
+    # Monday = 1, Sunday = 7
+    day_of_week = Date.day_of_week(first)
+    # Start from the Monday before the first day
+    start_date = Date.add(first, -(day_of_week - 1))
+    # Generate 42 days (6 weeks)
+    Enum.map(0..41, fn offset -> Date.add(start_date, offset) end)
+  end
+
+  defp in_selected_range?(_date, nil, _), do: false
+  defp in_selected_range?(_date, _, nil), do: false
+  defp in_selected_range?(date, from_str, to_str) do
+    with {:ok, from} <- Date.from_iso8601(from_str),
+         {:ok, to} <- Date.from_iso8601(to_str) do
+      Date.compare(date, from) != :lt && Date.compare(date, to) != :gt
+    else
+      _ -> false
+    end
+  end
+
+  defp is_range_endpoint?(_date, nil, nil), do: false
+  defp is_range_endpoint?(date, from_str, to_str) do
+    is_from = from_str && Date.to_iso8601(date) == from_str
+    is_to = to_str && Date.to_iso8601(date) == to_str
+    is_from || is_to
+  end
+
+  defp format_date_display(nil), do: "—"
+  defp format_date_display(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} -> Calendar.strftime(date, "%b %d, %Y")
+      _ -> date_str
+    end
+  end
+
+  defp date_range_label(from, to) do
+    parts = []
+    parts = if from, do: parts ++ [format_date_display(from)], else: parts
+    parts = if to, do: parts ++ [format_date_display(to)], else: parts
+    Enum.join(parts, " — ")
   end
 
   defp filtered_assignees(all_assignees, query, selected_ids) do
