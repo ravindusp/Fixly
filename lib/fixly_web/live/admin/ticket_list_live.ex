@@ -830,10 +830,11 @@ defmodule FixlyWeb.Admin.TicketListLive do
     }
   end
 
+  @status_order ["created", "triaged", "assigned", "on_hold", "in_progress", "completed", "reviewed", "closed"]
+
   defp group_by_status(tickets) do
-    order = ["created", "triaged", "assigned", "in_progress", "on_hold", "completed", "reviewed", "closed"]
     grouped = Enum.group_by(tickets, & &1.status)
-    order |> Enum.map(fn s -> {s, Map.get(grouped, s, [])} end) |> Enum.reject(fn {_, t} -> t == [] end)
+    Enum.map(@status_order, fn s -> {s, Map.get(grouped, s, [])} end)
   end
 
   defp filter_tickets_by_search(tickets, ""), do: tickets
