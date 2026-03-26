@@ -261,7 +261,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
 
   def handle_event("upload_proof", _params, socket) do
     ticket = socket.assigns.ticket
-    upload_dir = Path.join(["priv", "static", "uploads", "proof"])
+    upload_dir = Fixly.Uploads.dir("proof")
     File.mkdir_p!(upload_dir)
 
     uploaded_files =

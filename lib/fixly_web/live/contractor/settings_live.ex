@@ -164,7 +164,7 @@ defmodule FixlyWeb.Contractor.SettingsLive do
   def handle_event("save_cropped_logo", %{"data" => data_url}, socket) do
     case FixlyWeb.Admin.SettingsLive.decode_data_url(data_url) do
       {:ok, binary} ->
-        upload_dir = Path.join(["priv", "static", "uploads", "logos"])
+        upload_dir = Fixly.Uploads.dir("logos")
         File.mkdir_p!(upload_dir)
         filename = "#{Ecto.UUID.generate()}.png"
         dest = Path.join(upload_dir, filename)

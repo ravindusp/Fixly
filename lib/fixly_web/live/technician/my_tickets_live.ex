@@ -243,7 +243,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
   def handle_event("upload_proof", %{"ticket-id" => ticket_id}, socket) do
     # Ensure uploads directory exists
-    upload_dir = Path.join(["priv", "static", "uploads", "proof"])
+    upload_dir = Fixly.Uploads.dir("proof")
     File.mkdir_p!(upload_dir)
 
     uploaded_files =

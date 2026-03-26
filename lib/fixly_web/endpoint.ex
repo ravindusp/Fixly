@@ -27,6 +27,12 @@ defmodule FixlyWeb.Endpoint do
     only: FixlyWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
+  # Serve user uploads from a persistent directory outside the release
+  plug Plug.Static,
+    at: "/uploads",
+    from: "/opt/fixly/uploads",
+    gzip: false
+
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.
   if code_reloading? do
