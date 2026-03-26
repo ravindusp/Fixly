@@ -283,9 +283,9 @@ defmodule FixlyWeb.Admin.AssetsLive do
                 <div><span class="badge badge-sm badge-ghost">{String.capitalize(asset.category || "")}</span></div>
                 <div class="min-w-0">
                   <%= if asset.location do %>
-                    <% parts = if asset.location.path, do: String.split(asset.location.path, " > "), else: [asset.location.name] %>
-                    <p class="text-sm text-base-content/70 truncate">{List.first(parts)}</p>
-                    <p :if={length(parts) > 1} class="text-[10px] text-base-content/40 truncate">{Enum.join(tl(parts), " > ")}</p>
+                    <% root = root_location(asset.location) %>
+                    <p class="text-sm text-base-content/70 truncate">{root.name}</p>
+                    <p :if={root.id != asset.location.id} class="text-[10px] text-base-content/40 truncate">{asset.location.name}</p>
                   <% else %>
                     <p class="text-sm text-base-content/40">—</p>
                   <% end %>
@@ -682,6 +682,11 @@ defmodule FixlyWeb.Admin.AssetsLive do
   defp status_label("out_of_service"), do: "Out of Service"
   defp status_label("decommissioned"), do: "Decommissioned"
   defp status_label(other), do: String.capitalize(to_string(other))
+
+  # Walk up the parent chain to find the root location
+  defp root_location(%{parent: nil} = loc), do: loc
+  defp root_location(%{parent: %Ecto.Association.NotLoaded{}} = loc), do: loc
+  defp root_location(%{parent: parent}), do: root_location(parent)
 
   # Category dot colors for combobox
   defp category_dot_color("hvac"), do: "bg-red-500"
