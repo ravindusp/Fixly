@@ -9,7 +9,7 @@ defmodule Fixly.Accounts.UserNotifier do
     email =
       new()
       |> to(recipient)
-      |> from({"Fixly", "noreply@fixly.formastudio.cc"})
+      |> from({"Fixly", "noreply@onboarding.formastudio.cc"})
       |> subject(subject)
       |> text_body(body)
 

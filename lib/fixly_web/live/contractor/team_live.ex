@@ -13,6 +13,7 @@ defmodule FixlyWeb.Contractor.TeamLive do
       socket
       |> assign(:page_title, "Team")
       |> assign(:org_id, org_id)
+      |> assign(:current_user, user)
       |> assign(:invite_form, to_form(%{"email" => "", "name" => ""}))
       |> reload_data()
 
@@ -119,9 +120,19 @@ defmodule FixlyWeb.Contractor.TeamLive do
                     <p class="text-xs text-base-content/50">{invite.email}</p>
                   </div>
                 </div>
-                <span class="text-xs text-base-content/40">
-                  {Calendar.strftime(invite.inserted_at, "%b %d")}
-                </span>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-base-content/40">
+                    {Calendar.strftime(invite.inserted_at, "%b %d")}
+                  </span>
+                  <button
+                    phx-click="resend_invite"
+                    phx-value-user-id={invite.user_id}
+                    class="btn btn-xs btn-ghost gap-1"
+                  >
+                    <.icon name="hero-arrow-path" class="size-3" />
+                    Resend
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -133,45 +144,88 @@ defmodule FixlyWeb.Contractor.TeamLive do
 
   @impl true
   def handle_event("send_invite", %{"email" => email, "name" => name}, socket) do
-    user = socket.assigns.current_scope.user
+    user = socket.assigns.current_user
     org_id = socket.assigns.org_id
 
-    attrs = %{
-      email: email,
-      name: name,
-      role: "technician",
-      organization_id: org_id
-    }
+    # Check if email already exists
+    existing = Accounts.get_user_by_email(email)
 
-    case Accounts.invite_user(attrs, user) do
+    cond do
+      existing && existing.organization_id == org_id && existing.confirmed_at != nil ->
+        {:noreply, put_flash(socket, :error, "#{email} is already a member of your team")}
+
+      existing && existing.organization_id == org_id && existing.confirmed_at == nil ->
+        {:noreply, put_flash(socket, :error, "An invite is already pending for #{email}. Use the Resend button to send again.")}
+
+      existing ->
+        {:noreply, put_flash(socket, :error, "#{email} is already registered with another organization")}
+
+      true ->
+        attrs = %{
+          email: email,
+          name: name,
+          role: "technician",
+          organization_id: org_id
+        }
+
+        case Accounts.invite_user(attrs, user) do
+          {:ok, {invited_user, encoded_token}} ->
+            send_invite_email(invited_user, encoded_token, user, org_id)
+
+            {:noreply,
+             socket
+             |> put_flash(:info, "Invite sent to #{email}")
+             |> assign(:invite_form, to_form(%{"email" => "", "name" => ""}))
+             |> reload_data()}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            error_msg =
+              changeset.errors
+              |> Enum.map(fn
+                {:email, {"has already been taken", _}} -> "This email is already in use"
+                {field, {msg, _}} -> "#{field} #{msg}"
+              end)
+              |> Enum.join(", ")
+
+            {:noreply, put_flash(socket, :error, error_msg)}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to send invite")}
+        end
+    end
+  end
+
+  def handle_event("resend_invite", %{"user-id" => user_id}, socket) do
+    user = socket.assigns.current_user
+    org_id = socket.assigns.org_id
+
+    case Accounts.resend_invite(user_id) do
       {:ok, {invited_user, encoded_token}} ->
-        org = Organizations.get_organization!(org_id)
-        invite_url = url(~p"/users/invite/#{encoded_token}")
-
-        Accounts.UserNotifier.deliver_invite_instructions(
-          invited_user,
-          user.name || user.email,
-          org.name,
-          invite_url
-        )
+        send_invite_email(invited_user, encoded_token, user, org_id)
 
         {:noreply,
          socket
-         |> put_flash(:info, "Invite sent to #{email}")
-         |> assign(:invite_form, to_form(%{"email" => "", "name" => ""}))
+         |> put_flash(:info, "Invite resent to #{invited_user.email}")
          |> reload_data()}
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        error_msg =
-          changeset.errors
-          |> Enum.map(fn {field, {msg, _}} -> "#{field} #{msg}" end)
-          |> Enum.join(", ")
-
-        {:noreply, put_flash(socket, :error, "Failed to send invite: #{error_msg}")}
+      {:error, :already_confirmed} ->
+        {:noreply, put_flash(socket, :error, "This user has already accepted their invite")}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to send invite")}
+        {:noreply, put_flash(socket, :error, "Failed to resend invite")}
     end
+  end
+
+  defp send_invite_email(invited_user, encoded_token, inviter, org_id) do
+    org = Organizations.get_organization!(org_id)
+    invite_url = url(~p"/users/invite/#{encoded_token}")
+
+    Accounts.UserNotifier.deliver_invite_instructions(
+      invited_user,
+      inviter.name || inviter.email,
+      org.name,
+      invite_url
+    )
   end
 
   defp reload_data(socket) do

@@ -41,6 +41,7 @@ defmodule Fixly.Accounts do
       where: t.context == "invite" and u.organization_id == ^org_id and is_nil(u.confirmed_at),
       select: %{
         id: t.id,
+        user_id: u.id,
         email: u.email,
         name: u.name,
         role: u.role,
@@ -372,6 +373,28 @@ defmodule Fixly.Accounts do
         {:ok, {user, encoded_token}}
       end
     end)
+  end
+
+  @doc """
+  Resend an invite for an existing pending user. Deletes old invite tokens and creates a new one.
+  Returns `{:ok, {user, encoded_token}}` or `{:error, :not_found}`.
+  """
+  def resend_invite(user_id) do
+    user = Repo.get(User, user_id)
+
+    cond do
+      is_nil(user) -> {:error, :not_found}
+      user.confirmed_at != nil -> {:error, :already_confirmed}
+      true ->
+        # Delete old invite tokens
+        from(t in UserToken, where: t.user_id == ^user.id and t.context == "invite")
+        |> Repo.delete_all()
+
+        # Create new token
+        {encoded_token, user_token} = UserToken.build_invite_token(user)
+        Repo.insert!(user_token)
+        {:ok, {user, encoded_token}}
+    end
   end
 
   @doc """
