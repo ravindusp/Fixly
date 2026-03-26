@@ -28,12 +28,14 @@ import topbar from "../vendor/topbar"
 import { SLATimer } from "./hooks/sla_timer"
 import { KanbanDrop } from "./hooks/kanban_drop"
 import { InfiniteScroll } from "./hooks/infinite_scroll"
+import { LogoCropper } from "./hooks/logo_cropper"
 
 const Hooks = {
   ...colocatedHooks,
   SLATimer,
   KanbanDrop,
   InfiniteScroll,
+  LogoCropper,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
