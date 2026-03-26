@@ -51,8 +51,8 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   def render(assigns) do
     ~H"""
     <div class="flex gap-6 h-full">
-      <!-- Main content -->
-      <div class="flex-1 min-w-0 space-y-4">
+      <!-- Main content (hidden on mobile when panel is open) -->
+      <div class={["flex-1 min-w-0 space-y-4", @selected_ticket && "hidden lg:block"]}>
         <!-- Header with tabs -->
         <div class="flex items-center justify-between">
           <div>
@@ -182,11 +182,14 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
   defp ticket_detail(assigns) do
     ~H"""
-    <div class="w-full lg:w-[420px] shrink-0 bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-y-auto max-h-[calc(100vh-7rem)] animate-in slide-in-from-right">
+    <div class="w-full lg:w-[420px] shrink-0 bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-y-auto max-h-[calc(100vh-7rem)] lg:animate-in lg:slide-in-from-right">
       <!-- Header -->
       <div class="sticky top-0 z-10 bg-base-100 border-b border-base-300 px-5 py-3.5">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2.5">
+            <button phx-click="close_panel" class="btn btn-ghost btn-xs btn-square lg:hidden">
+              <.icon name="hero-arrow-left" class="size-4" />
+            </button>
             <span class="text-base font-bold text-base-content">{@ticket.reference_number}</span>
             <span class={[
               "badge badge-sm",
@@ -198,7 +201,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
               {status_label(@ticket.status)}
             </span>
           </div>
-          <button phx-click="close_panel" class="btn btn-ghost btn-xs btn-square">
+          <button phx-click="close_panel" class="btn btn-ghost btn-xs btn-square hidden lg:flex">
             <.icon name="hero-x-mark" class="size-4" />
           </button>
         </div>
