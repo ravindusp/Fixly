@@ -255,7 +255,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
 
             <!-- Asset table -->
             <!-- Header -->
-            <div class="grid grid-cols-[2fr_1fr_1.5fr_1fr_1fr_0.5fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+            <div class="grid grid-cols-[2fr_1fr_1.5fr_1.2fr_0.8fr_0.5fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
               <span>Asset</span><span>Category</span><span>Location</span><span>Status</span><span>Tickets</span><span></span>
             </div>
             <!-- Rows (streamed) -->
@@ -266,7 +266,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
                 phx-click="select_asset"
                 phx-value-id={asset.id}
                 class={[
-                  "grid grid-cols-[2fr_1fr_1.5fr_1fr_1fr_0.5fr] gap-4 px-5 py-3 border-b border-base-200 items-center cursor-pointer transition-colors",
+                  "grid grid-cols-[2fr_1fr_1.5fr_1.2fr_0.8fr_0.5fr] gap-4 px-5 py-3 border-b border-base-200 items-center cursor-pointer transition-colors",
                   @selected_asset && @selected_asset.id == asset.id && "bg-primary/5 border-l-2 border-l-primary",
                   !(@selected_asset && @selected_asset.id == asset.id) && "hover:bg-base-200/30"
                 ]}
@@ -281,7 +281,18 @@ defmodule FixlyWeb.Admin.AssetsLive do
                   </div>
                 </div>
                 <div><span class="badge badge-sm badge-ghost">{String.capitalize(asset.category || "")}</span></div>
-                <div class="text-sm text-base-content/70 truncate">{if asset.location, do: asset.location.name, else: "—"}</div>
+                <div class="min-w-0">
+                  <%= if asset.location do %>
+                    <%= if asset.location.parent do %>
+                      <p class="text-sm text-base-content/70 truncate">{asset.location.parent.name}</p>
+                      <p class="text-[10px] text-base-content/40 truncate">{asset.location.name}</p>
+                    <% else %>
+                      <p class="text-sm text-base-content/70 truncate">{asset.location.name}</p>
+                    <% end %>
+                  <% else %>
+                    <p class="text-sm text-base-content/40">—</p>
+                  <% end %>
+                </div>
                 <div><.status_pill status={asset.status} /></div>
                 <div class="text-sm text-base-content/60">{asset.ticket_count}</div>
                 <div></div>
@@ -397,7 +408,7 @@ defmodule FixlyWeb.Admin.AssetsLive do
   defp status_pill(assigns) do
     ~H"""
     <span class={[
-      "badge badge-sm font-medium",
+      "badge badge-sm font-medium whitespace-nowrap",
       @status == "operational" && "badge-success",
       @status == "needs_attention" && "badge-info",
       @status == "needs_repair" && "badge-warning",

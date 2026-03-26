@@ -13,7 +13,7 @@ defmodule Fixly.Assets do
     Asset
     |> where([a], a.organization_id == ^org_id)
     |> apply_asset_filters(filters)
-    |> preload([:location])
+    |> preload([location: :parent])
     |> Fixly.Pagination.paginate_asc(cursor: cursor)
   end
 
@@ -90,7 +90,7 @@ defmodule Fixly.Assets do
   def get_asset!(id) do
     Asset
     |> Repo.get!(id)
-    |> Repo.preload([:location, :organization, :ticket_asset_links])
+    |> Repo.preload([location: :parent, organization: [], ticket_asset_links: []])
   end
 
   def get_asset(id), do: Repo.get(Asset, id)
@@ -100,7 +100,7 @@ defmodule Fixly.Assets do
     Asset
     |> where([a], a.organization_id == ^org_id)
     |> order_by([a], [asc: a.name])
-    |> preload([:location])
+    |> preload([location: :parent])
     |> Repo.all()
   end
 
