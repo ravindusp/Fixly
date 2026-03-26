@@ -181,6 +181,86 @@ defmodule Fixly.Organizations do
     end
   end
 
+  # --- Organization status management (super admin) ---
+
+  @doc "List organizations by status."
+  def list_organizations_by_status(status) do
+    from(o in Organization,
+      where: o.status == ^status,
+      order_by: [desc: o.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc "Count organizations by status."
+  def count_organizations_by_status do
+    from(o in Organization,
+      group_by: o.status,
+      select: {o.status, count(o.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "Approve a pending organization."
+  def approve_organization(org_id) do
+    case Repo.get(Organization, org_id) do
+      nil -> {:error, :not_found}
+      org ->
+        org
+        |> Organization.status_changeset(%{status: "active"})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Reject a pending organization (deletes org and its users)."
+  def reject_organization(org_id) do
+    case Repo.get(Organization, org_id) do
+      nil -> {:error, :not_found}
+      org -> Repo.delete(org)
+    end
+  end
+
+  @doc "Suspend an active organization."
+  def suspend_organization(org_id) do
+    case Repo.get(Organization, org_id) do
+      nil -> {:error, :not_found}
+      org ->
+        org
+        |> Organization.status_changeset(%{status: "suspended"})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Reactivate a suspended organization."
+  def reactivate_organization(org_id) do
+    case Repo.get(Organization, org_id) do
+      nil -> {:error, :not_found}
+      org ->
+        org
+        |> Organization.status_changeset(%{status: "active"})
+        |> Repo.update()
+    end
+  end
+
+  @doc "Get organization with owner user preloaded."
+  def get_organization_with_owner(org_id) do
+    org = Repo.get(Organization, org_id)
+
+    if org do
+      owner =
+        from(u in Fixly.Accounts.User,
+          where: u.organization_id == ^org_id,
+          where: u.role in ["org_admin", "contractor_admin"],
+          order_by: [asc: u.inserted_at],
+          limit: 1
+        )
+        |> Repo.one()
+
+      {org, owner}
+    end
+  end
+
   @doc "Count team members in an organization."
   def count_team_members(org_id) do
     from(u in Fixly.Accounts.User,

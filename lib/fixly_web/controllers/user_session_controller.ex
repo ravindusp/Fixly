@@ -23,9 +23,17 @@ defmodule FixlyWeb.UserSessionController do
 
     case Accounts.login_user_by_magic_link(token) do
       {:ok, {user, _expired_tokens}} ->
-        conn
-        |> put_flash(:info, info)
-        |> UserAuth.log_in_user(user, user_params)
+        case check_org_status(user) do
+          :ok ->
+            conn
+            |> put_flash(:info, info)
+            |> UserAuth.log_in_user(user, user_params)
+
+          {:error, message} ->
+            conn
+            |> put_flash(:error, message)
+            |> redirect(to: ~p"/users/log-in")
+        end
 
       {:error, :not_found} ->
         conn
@@ -37,9 +45,19 @@ defmodule FixlyWeb.UserSessionController do
   # email + password login
   def create(conn, %{"user" => %{"email" => email, "password" => password} = user_params}) do
     if user = Accounts.get_user_by_email_and_password(email, password) do
-      conn
-      |> put_flash(:info, "Welcome back!")
-      |> UserAuth.log_in_user(user, user_params)
+      case check_org_status(user) do
+        :ok ->
+          conn
+          |> put_flash(:info, "Welcome back!")
+          |> UserAuth.log_in_user(user, user_params)
+
+        {:error, message} ->
+          form = Phoenix.Component.to_form(user_params, as: "user")
+
+          conn
+          |> put_flash(:error, message)
+          |> render(:new, form: form)
+      end
     else
       form = Phoenix.Component.to_form(user_params, as: "user")
 
@@ -86,5 +104,29 @@ defmodule FixlyWeb.UserSessionController do
     conn
     |> put_flash(:info, "Logged out successfully.")
     |> UserAuth.log_out_user()
+  end
+
+  # Check organization status before allowing login
+  defp check_org_status(%{role: "super_admin"}), do: :ok
+
+  defp check_org_status(%{organization_id: nil}), do: :ok
+
+  defp check_org_status(user) do
+    case Fixly.Organizations.get_organization(user.organization_id) do
+      nil ->
+        :ok
+
+      %{status: "active"} ->
+        :ok
+
+      %{status: "pending"} ->
+        {:error, "Your account is under review. You'll be able to log in once approved by our team."}
+
+      %{status: "suspended"} ->
+        {:error, "Your organization has been suspended. Please contact support for assistance."}
+
+      _ ->
+        {:error, "Unable to log in. Please contact support."}
+    end
   end
 end

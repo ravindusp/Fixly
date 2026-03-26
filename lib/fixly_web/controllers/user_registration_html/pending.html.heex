@@ -1,0 +1,45 @@
+<main class="flex-grow flex items-center justify-center py-20 px-6">
+  <div class="max-w-lg w-full">
+    <div class="bg-white rounded-xl p-10 lg:p-14 shadow-sm text-center space-y-6">
+      <div class="w-16 h-16 rounded-full bg-[#00236f]/10 flex items-center justify-center mx-auto">
+        <.icon name="hero-clock" class="size-8 text-[#00236f]" />
+      </div>
+
+      <div class="space-y-2">
+        <h1 class="text-2xl font-bold text-[#171c1f]" style="font-family: 'Manrope', sans-serif;">
+          Account Under Review
+        </h1>
+        <p class="text-[#444651] text-sm leading-relaxed">
+          Thank you for registering with Fixly. Your account has been submitted for review
+          and will be activated by our team shortly.
+        </p>
+      </div>
+
+      <div class="bg-[#f0f4f8] rounded-lg p-4 space-y-2">
+        <p class="text-xs font-semibold text-[#444651] uppercase tracking-wider">What happens next?</p>
+        <ul class="text-sm text-[#444651] space-y-1.5 text-left">
+          <li class="flex items-start gap-2">
+            <.icon name="hero-check-circle" class="size-4 text-[#00236f] mt-0.5 shrink-0" />
+            <span>Our team will review your registration</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <.icon name="hero-check-circle" class="size-4 text-[#00236f] mt-0.5 shrink-0" />
+            <span>You'll be able to log in once your account is approved</span>
+          </li>
+          <li class="flex items-start gap-2">
+            <.icon name="hero-check-circle" class="size-4 text-[#00236f] mt-0.5 shrink-0" />
+            <span>This typically takes less than 24 hours</span>
+          </li>
+        </ul>
+      </div>
+
+      <.link
+        navigate={~p"/users/log-in"}
+        class="inline-flex items-center gap-2 text-[#00236f] font-semibold text-sm hover:underline"
+      >
+        <.icon name="hero-arrow-left" class="size-4" />
+        Back to Login
+      </.link>
+    </div>
+  </div>
+</main>

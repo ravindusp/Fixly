@@ -38,6 +38,15 @@
           <.sidebar_link href={~p"/admin/team"} icon="hero-user-group" label="Team" />
           <.sidebar_link href={~p"/admin/settings"} icon="hero-cog-6-tooth" label="Settings" />
         </div>
+
+        <%= if @current_scope.user.role == "super_admin" do %>
+          <div class="pt-4">
+            <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+              Platform
+            </p>
+            <.sidebar_link href={~p"/super/organizations"} icon="hero-shield-check" label="Organizations" />
+          </div>
+        <% end %>
       <% end %>
 
       <%= if @current_scope && @current_scope.user.role == "contractor_admin" do %>

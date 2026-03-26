@@ -34,6 +34,17 @@ defmodule FixlyWeb.Router do
     end
   end
 
+  # Super admin routes
+  scope "/super", FixlyWeb.Super do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :super_admin,
+      on_mount: [{FixlyWeb.UserAuth, {:require_role, ["super_admin"]}}],
+      layout: {FixlyWeb.Layouts, :app} do
+      live "/organizations", OrganizationsLive, :index
+    end
+  end
+
   # Admin routes (authenticated, role-guarded)
   scope "/admin", FixlyWeb.Admin do
     pipe_through [:browser, :require_authenticated_user]
@@ -142,6 +153,7 @@ defmodule FixlyWeb.Router do
   scope "/", FixlyWeb do
     pipe_through [:browser]
 
+    get "/users/pending", UserRegistrationController, :pending
     get "/users/log-in", UserSessionController, :new
     get "/users/log-in/:token", UserSessionController, :confirm
     post "/users/log-in", UserSessionController, :create

@@ -133,7 +133,8 @@ defmodule Fixly.Accounts do
         with {:ok, org} <-
                Fixly.Organizations.create_organization(%{
                  name: "#{name}'s Organization",
-                 type: org_type
+                 type: org_type,
+                 status: "pending"
                }),
              {:ok, user} <-
                changeset

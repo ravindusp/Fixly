@@ -6,10 +6,12 @@ defmodule Fixly.Organizations.Organization do
   @foreign_key_type :binary_id
 
   @types ~w(owner contractor)
+  @statuses ~w(pending active suspended)
 
   schema "organizations" do
     field :name, :string
     field :type, :string
+    field :status, :string, default: "active"
     field :settings, :map, default: %{}
     field :slug, :string
     field :display_code, :string
@@ -33,9 +35,17 @@ defmodule Fixly.Organizations.Organization do
 
   def changeset(org, attrs) do
     org
-    |> cast(attrs, [:name, :type, :parent_org_id, :settings])
+    |> cast(attrs, [:name, :type, :status, :parent_org_id, :settings])
     |> validate_required([:name, :type])
     |> validate_inclusion(:type, @types)
+    |> validate_inclusion(:status, @statuses)
+  end
+
+  def status_changeset(org, attrs) do
+    org
+    |> cast(attrs, [:status])
+    |> validate_required([:status])
+    |> validate_inclusion(:status, @statuses)
   end
 
   def profile_changeset(org, attrs) do

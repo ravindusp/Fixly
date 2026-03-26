@@ -15,11 +15,14 @@ defmodule FixlyWeb.UserRegistrationController do
     case Accounts.register_user(user_params) do
       {:ok, _user} ->
         conn
-        |> put_flash(:info, "Account created successfully. Please log in.")
-        |> redirect(to: ~p"/users/log-in")
+        |> redirect(to: ~p"/users/pending")
 
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, :new, changeset: changeset)
     end
+  end
+
+  def pending(conn, _params) do
+    render(conn, :pending)
   end
 end
