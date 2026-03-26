@@ -1,0 +1,105 @@
+<main class="flex-grow flex items-center justify-center px-6 py-12 md:py-24">
+  <div class="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-0 overflow-hidden rounded-xl shadow-2xl bg-white">
+    <%!-- Left Side: Brand & Visual --%>
+    <div class="hidden md:flex flex-col justify-between p-12 auth-gradient relative overflow-hidden">
+      <div class="relative z-10">
+        <div class="flex items-center gap-3 mb-12">
+          <div class="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+            <.icon name="hero-wrench-screwdriver" class="size-5 text-white" />
+          </div>
+          <span class="text-2xl font-extrabold tracking-tighter text-white" style="font-family: 'Manrope', sans-serif;">
+            Fixly
+          </span>
+        </div>
+        <h1 class="text-4xl lg:text-5xl font-bold leading-tight text-white mb-6" style="font-family: 'Manrope', sans-serif;">
+          Welcome to <br /><span class="text-[#90a8ff]">Your Team.</span>
+        </h1>
+        <p class="text-white/80 text-lg max-w-md leading-relaxed">
+          You've been invited to join your team on Fixly. Set up your password to get started.
+        </p>
+      </div>
+      <div class="relative z-10 mt-12">
+        <div class="flex items-center gap-4 p-4 rounded-lg auth-glass border border-white/10">
+          <div class="w-10 h-10 rounded-full border-2 border-white bg-[#1e3a8a] flex items-center justify-center">
+            <.icon name="hero-shield-check" class="size-5 text-white" />
+          </div>
+          <p class="text-sm font-medium text-[#00236f]">Secure, encrypted account setup</p>
+        </div>
+      </div>
+      <div class="absolute top-[-10%] right-[-10%] w-64 h-64 rounded-full bg-white/5 blur-3xl"></div>
+      <div class="absolute bottom-[-5%] left-[-5%] w-48 h-48 rounded-full bg-[#1e3a8a]/20 blur-2xl"></div>
+    </div>
+
+    <%!-- Right Side: Set Password Form --%>
+    <div class="p-8 md:p-16 flex flex-col justify-center bg-white">
+      <div class="mb-10">
+        <h2 class="text-3xl font-bold text-[#171c1f] mb-2" style="font-family: 'Manrope', sans-serif;">
+          Set Your Password
+        </h2>
+        <p class="text-[#444651] font-medium">
+          Hi <span class="font-bold">{@user.name}</span>, create a password to activate your account.
+        </p>
+      </div>
+
+      <div class="mb-6 p-4 rounded-lg bg-[#f0f4f8] border border-[#c5c5d3]/30">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-[#00236f]/10 flex items-center justify-center">
+            <.icon name="hero-envelope" class="size-5 text-[#00236f]" />
+          </div>
+          <div>
+            <p class="text-sm text-[#444651]">{@user.email}</p>
+            <p class="text-xs text-[#444651]/60 capitalize">{@user.role |> String.replace("_", " ")}</p>
+          </div>
+        </div>
+      </div>
+
+      <.form
+        :let={f}
+        for={@changeset}
+        as={:user}
+        action={~p"/users/invite/#{@token}"}
+        class="auth-form space-y-6"
+      >
+        <div>
+          <span class="label text-xs font-bold uppercase tracking-widest text-[#444651]">Password</span>
+          <.input
+            field={f[:password]}
+            type="password"
+            autocomplete="new-password"
+            required
+            placeholder="Minimum 12 characters"
+            class="auth-input w-full px-4 py-3 bg-[#e4e9ed] border-b-2 border-transparent rounded-md text-[#171c1f] text-sm"
+          />
+        </div>
+
+        <div>
+          <span class="label text-xs font-bold uppercase tracking-widest text-[#444651]">Confirm Password</span>
+          <.input
+            field={f[:password_confirmation]}
+            type="password"
+            autocomplete="new-password"
+            required
+            placeholder="Re-enter your password"
+            class="auth-input w-full px-4 py-3 bg-[#e4e9ed] border-b-2 border-transparent rounded-md text-[#171c1f] text-sm"
+          />
+        </div>
+
+        <.button
+          class="auth-btn w-full text-white font-bold py-4 rounded-md shadow-lg shadow-[#00236f]/20 hover:shadow-xl hover:shadow-[#00236f]/30 transition-all active:scale-[0.98]"
+          style="font-family: 'Manrope', sans-serif;"
+        >
+          Activate Account
+        </.button>
+      </.form>
+    </div>
+  </div>
+</main>
+
+<footer class="flex flex-col md:flex-row justify-between items-center px-8 py-6 w-full border-t border-slate-200 bg-slate-50">
+  <div class="mb-4 md:mb-0">
+    <span class="text-lg font-bold text-[#00236f]">Fixly</span>
+  </div>
+  <div class="text-xs text-slate-500 mb-4 md:mb-0">
+    &copy; {DateTime.utc_now().year} Fixly. All rights reserved.
+  </div>
+</footer>

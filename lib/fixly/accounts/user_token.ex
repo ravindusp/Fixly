@@ -11,6 +11,7 @@ defmodule Fixly.Accounts.UserToken do
   @magic_link_validity_in_minutes 15
   @change_email_validity_in_days 7
   @session_validity_in_days 14
+  @invite_validity_in_days 7
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -144,6 +145,38 @@ defmodule Fixly.Accounts.UserToken do
         query =
           from token in by_token_and_context_query(hashed_token, context),
             where: token.inserted_at > ago(@change_email_validity_in_days, "day")
+
+        {:ok, query}
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc """
+  Builds a hashed invite token for a user.
+  Returns `{url_token, %UserToken{}}`.
+  """
+  def build_invite_token(user) do
+    build_hashed_token(user, "invite", user.email)
+  end
+
+  @doc """
+  Checks if the invite token is valid and returns a query for the user.
+  Returns `{:ok, query}` or `:error`.
+  The query returns `{user, token}`.
+  """
+  def verify_invite_token_query(token) do
+    case Base.url_decode64(token, padding: false) do
+      {:ok, decoded_token} ->
+        hashed_token = :crypto.hash(@hash_algorithm, decoded_token)
+
+        query =
+          from token in by_token_and_context_query(hashed_token, "invite"),
+            join: user in assoc(token, :user),
+            where: token.inserted_at > ago(@invite_validity_in_days, "day"),
+            where: token.sent_to == user.email,
+            select: {user, token}
 
         {:ok, query}
 

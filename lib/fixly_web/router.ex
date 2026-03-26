@@ -34,12 +34,12 @@ defmodule FixlyWeb.Router do
     end
   end
 
-  # Admin routes (authenticated)
+  # Admin routes (authenticated, role-guarded)
   scope "/admin", FixlyWeb.Admin do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :admin,
-      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      on_mount: [{FixlyWeb.UserAuth, {:require_role, ["super_admin", "org_admin"]}}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/", DashboardLive, :index
       live "/tickets", TicketListLive, :index
@@ -49,10 +49,12 @@ defmodule FixlyWeb.Router do
       live "/assets/:id", AssetDetailLive, :show
       live "/ai-review", AIReviewLive, :index
       live "/analytics", AnalyticsLive, :index
+      live "/team", TeamLive, :index
+      live "/contractors", ContractorsLive, :index
     end
   end
 
-  # Export routes (authenticated, non-LiveView)
+  # Export routes (authenticated, admin-only)
   scope "/admin/export", FixlyWeb do
     pipe_through [:browser, :require_authenticated_user]
 
@@ -60,35 +62,36 @@ defmodule FixlyWeb.Router do
     get "/analytics.csv", ExportController, :analytics_csv
   end
 
-  # Contractor routes (authenticated)
+  # Contractor routes (authenticated, role-guarded)
   scope "/contractor", FixlyWeb.Contractor do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :contractor,
-      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      on_mount: [{FixlyWeb.UserAuth, {:require_role, ["contractor_admin"]}}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/tickets", TicketListLive, :index
       live "/tickets/:id", TicketDetailLive, :show
+      live "/team", TeamLive, :index
     end
   end
 
-  # Technician routes (authenticated)
+  # Technician routes (authenticated, role-guarded)
   scope "/tech", FixlyWeb.Technician do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :technician,
-      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      on_mount: [{FixlyWeb.UserAuth, {:require_role, ["technician"]}}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/tickets", MyTicketsLive, :index
     end
   end
 
-  # Resident routes (authenticated)
+  # Resident routes (authenticated, role-guarded)
   scope "/my", FixlyWeb.Resident do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :resident,
-      on_mount: [{FixlyWeb.UserAuth, :ensure_authenticated}],
+      on_mount: [{FixlyWeb.UserAuth, {:require_role, ["resident"]}}],
       layout: {FixlyWeb.Layouts, :app} do
       live "/tickets", MyTicketsLive, :index
     end
@@ -140,5 +143,9 @@ defmodule FixlyWeb.Router do
     get "/users/log-in/:token", UserSessionController, :confirm
     post "/users/log-in", UserSessionController, :create
     delete "/users/log-out", UserSessionController, :delete
+
+    # Invite acceptance (public — token-gated)
+    get "/users/invite/:token", UserInviteController, :show
+    post "/users/invite/:token", UserInviteController, :accept
   end
 end

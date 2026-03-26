@@ -22,13 +22,40 @@ defmodule Fixly.Accounts.User do
     timestamps(type: :utc_datetime)
   end
 
+  @registerable_roles ~w(org_admin contractor_admin)
+
   def roles, do: @roles
+  def registerable_roles, do: @registerable_roles
+
+  @doc "Changeset for self-service registration (name, email, password, role)."
+  def registration_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:name, :email, :password, :role])
+    |> validate_required([:name])
+    |> validate_email(opts)
+    |> validate_inclusion(:role, @registerable_roles, message: "is not a valid registration role")
+    |> validate_password(opts)
+  end
 
   @doc "Changeset for admin-managed profile fields (name, phone, role, org)."
   def profile_changeset(user, attrs) do
     user
     |> cast(attrs, [:name, :phone, :role, :organization_id])
     |> validate_inclusion(:role, @roles)
+  end
+
+  @doc "Changeset for creating an invited user (no password required)."
+  def invite_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email, :name, :role, :organization_id])
+    |> validate_required([:email, :name, :role, :organization_id])
+    |> validate_inclusion(:role, @roles)
+    |> validate_format(:email, ~r/^[^@,;\s]+@[^@,;\s]+$/,
+      message: "must have the @ sign and no spaces"
+    )
+    |> validate_length(:email, max: 160)
+    |> unsafe_validate_unique(:email, Fixly.Repo)
+    |> unique_constraint(:email)
   end
 
   @doc """

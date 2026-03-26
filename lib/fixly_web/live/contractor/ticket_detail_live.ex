@@ -2,6 +2,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
   use FixlyWeb, :live_view
 
   alias Fixly.Tickets
+  alias Fixly.Tickets.StatusMachine
   alias Fixly.Accounts
 
   @impl true
@@ -9,7 +10,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
     ticket = Tickets.get_ticket!(id)
     comments = Tickets.list_comments(id)
     user = socket.assigns.current_scope.user
-    technicians = Accounts.list_users_by_organization(user.organization_id)
+    technicians = Accounts.list_technicians_by_organization(user.organization_id)
 
     socket =
       socket
@@ -18,6 +19,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
       |> assign(:comments, comments)
       |> assign(:technicians, technicians)
       |> assign(:comment_body, "")
+      |> allow_upload(:proof, accept: ~w(.jpg .jpeg .png .webp), max_entries: 5, max_file_size: 10_000_000)
 
     {:ok, socket}
   end
@@ -122,14 +124,32 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
             <h3 class="text-sm font-semibold text-base-content mb-3">Update Status</h3>
             <div class="flex flex-wrap gap-2">
               <button
-                :for={s <- ["in_progress", "on_hold", "completed"]}
+                :for={s <- StatusMachine.allowed_transitions("contractor_admin", @ticket.status)}
                 phx-click="update_status"
                 phx-value-status={s}
                 class={["btn btn-sm", @ticket.status == s && "btn-primary", @ticket.status != s && "btn-ghost"]}
               >
                 {status_label(s)}
               </button>
+              <p :if={StatusMachine.allowed_transitions("contractor_admin", @ticket.status) == []} class="text-xs text-base-content/40">
+                No status changes available
+              </p>
             </div>
+          </div>
+
+          <!-- Upload proof -->
+          <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm p-5">
+            <h3 class="text-sm font-semibold text-base-content mb-3">Upload Proof</h3>
+            <form id="contractor-upload-proof" phx-submit="upload_proof" phx-change="validate_upload">
+              <.live_file_input upload={@uploads.proof} class="file-input file-input-bordered file-input-xs w-full" />
+              <div :for={entry <- @uploads.proof.entries} class="flex items-center gap-2 mt-2 text-xs text-base-content/60">
+                <span>{entry.client_name}</span>
+                <button type="button" phx-click="cancel_upload" phx-value-ref={entry.ref} class="text-error">&times;</button>
+              </div>
+              <button :if={@uploads.proof.entries != []} type="submit" class="btn btn-xs btn-outline btn-primary mt-2 w-full">
+                Upload Files
+              </button>
+            </form>
           </div>
 
           <!-- SLA -->
@@ -179,21 +199,41 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
   end
 
   def handle_event("assign_technician", %{"user_id" => user_id}, socket) do
-    {:ok, _} = Tickets.assign_ticket(socket.assigns.ticket, %{assigned_to_user_id: user_id})
-    {:noreply, assign(socket, :ticket, Tickets.get_ticket!(socket.assigns.ticket.id))}
+    ticket = socket.assigns.ticket
+    user = socket.assigns.current_scope.user
+
+    case Tickets.assign_to_technician(ticket, user_id, user) do
+      {:ok, _} ->
+        {:noreply, assign(socket, :ticket, Tickets.get_ticket!(ticket.id))}
+
+      {:error, :not_your_ticket} ->
+        {:noreply, put_flash(socket, :error, "This ticket is not assigned to your organization")}
+
+      {:error, :tech_not_in_org} ->
+        {:noreply, put_flash(socket, :error, "This technician is not in your organization")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign technician")}
+    end
   end
 
   def handle_event("update_status", %{"status" => status}, socket) do
     ticket = socket.assigns.ticket
+    user = socket.assigns.current_scope.user
 
-    case status do
-      "on_hold" -> Tickets.pause_sla(ticket)
-      "in_progress" when ticket.status == "on_hold" -> Tickets.resume_sla(ticket)
-      _ -> :ok
+    case Tickets.update_ticket_status(ticket, status, user) do
+      {:ok, updated} ->
+        {:noreply, assign(socket, :ticket, Tickets.get_ticket!(updated.id))}
+
+      {:error, :unauthorized_transition} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to make this status change")}
+
+      {:error, :proof_required} ->
+        {:noreply, put_flash(socket, :error, "Please upload proof of completion (photos) before marking as completed")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update status")}
     end
-
-    {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
-    {:noreply, assign(socket, :ticket, Tickets.get_ticket!(ticket.id))}
   end
 
   def handle_event("add_comment", %{"body" => body}, socket) when body != "" do
@@ -210,6 +250,43 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
   end
 
   def handle_event("add_comment", _, socket), do: {:noreply, socket}
+
+  def handle_event("validate_upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :proof, ref)}
+  end
+
+  def handle_event("upload_proof", _params, socket) do
+    ticket = socket.assigns.ticket
+    upload_dir = Path.join(["priv", "static", "uploads", "proof"])
+    File.mkdir_p!(upload_dir)
+
+    uploaded_files =
+      consume_uploaded_entries(socket, :proof, fn %{path: path}, entry ->
+        dest = Path.join(upload_dir, "#{Ecto.UUID.generate()}_#{entry.client_name}")
+        File.cp!(path, dest)
+        {:ok, "/uploads/proof/#{Path.basename(dest)}"}
+      end)
+
+    for file_url <- uploaded_files do
+      Tickets.create_attachment(%{
+        ticket_id: ticket.id,
+        file_url: file_url,
+        file_name: Path.basename(file_url),
+        file_type: "image"
+      })
+    end
+
+    updated_ticket = Tickets.get_ticket!(ticket.id)
+
+    {:noreply,
+     socket
+     |> assign(:ticket, updated_ticket)
+     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded")}
+  end
 
   # --- Helpers ---
 

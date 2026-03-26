@@ -9,7 +9,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
 
-    technicians = Accounts.list_users_by_organization(org_id)
+    technicians = Accounts.list_technicians_by_organization(org_id)
 
     socket =
       socket
@@ -217,9 +217,21 @@ defmodule FixlyWeb.Contractor.TicketListLive do
 
   def handle_event("assign_technician", %{"ticket-id" => ticket_id, "user-id" => user_id}, socket) do
     ticket = Tickets.get_ticket!(ticket_id)
-    {:ok, _ticket} = Tickets.assign_ticket(ticket, %{assigned_to_user_id: user_id})
+    user = socket.assigns.current_scope.user
 
-    {:noreply, reload_data(socket)}
+    case Tickets.assign_to_technician(ticket, user_id, user) do
+      {:ok, _ticket} ->
+        {:noreply, reload_data(socket)}
+
+      {:error, :not_your_ticket} ->
+        {:noreply, put_flash(socket, :error, "This ticket is not assigned to your organization")}
+
+      {:error, :tech_not_in_org} ->
+        {:noreply, put_flash(socket, :error, "This technician is not in your organization")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign technician")}
+    end
   end
 
   # --- Helpers ---

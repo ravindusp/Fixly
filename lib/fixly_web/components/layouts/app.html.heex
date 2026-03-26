@@ -13,21 +13,53 @@
 
     <!-- Nav -->
     <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-      <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
-        Main Menu
-      </p>
-      <.sidebar_link href={~p"/admin"} icon="hero-squares-2x2" label="Dashboard" />
-      <.sidebar_link href={~p"/admin/tickets"} icon="hero-ticket" label="Tickets" />
-      <.sidebar_link href={~p"/admin/locations"} icon="hero-building-office-2" label="Locations" />
-      <.sidebar_link href={~p"/admin/assets"} icon="hero-cube" label="Assets" />
-      <.sidebar_link href={~p"/admin/ai-review"} icon="hero-sparkles" label="AI Review" />
-
-      <div class="pt-4">
+      <%= if @current_scope && @current_scope.user.role in ["super_admin", "org_admin"] do %>
         <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
-          Insights
+          Main Menu
         </p>
-        <.sidebar_link href={~p"/admin/analytics"} icon="hero-chart-bar" label="Analytics" />
-      </div>
+        <.sidebar_link href={~p"/admin"} icon="hero-squares-2x2" label="Dashboard" />
+        <.sidebar_link href={~p"/admin/tickets"} icon="hero-ticket" label="Tickets" />
+        <.sidebar_link href={~p"/admin/locations"} icon="hero-building-office-2" label="Locations" />
+        <.sidebar_link href={~p"/admin/assets"} icon="hero-cube" label="Assets" />
+        <.sidebar_link href={~p"/admin/ai-review"} icon="hero-sparkles" label="AI Review" />
+
+        <div class="pt-4">
+          <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+            Insights
+          </p>
+          <.sidebar_link href={~p"/admin/analytics"} icon="hero-chart-bar" label="Analytics" />
+        </div>
+
+        <div class="pt-4">
+          <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+            Organization
+          </p>
+          <.sidebar_link href={~p"/admin/contractors"} icon="hero-building-storefront" label="Contractors" />
+          <.sidebar_link href={~p"/admin/team"} icon="hero-user-group" label="Team" />
+        </div>
+      <% end %>
+
+      <%= if @current_scope && @current_scope.user.role == "contractor_admin" do %>
+        <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+          Main Menu
+        </p>
+        <.sidebar_link href={~p"/contractor/tickets"} icon="hero-ticket" label="Tickets" />
+        <.sidebar_link href={~p"/contractor/team"} icon="hero-user-group" label="Team" />
+      <% end %>
+
+      <%= if @current_scope && @current_scope.user.role == "technician" do %>
+        <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+          Main Menu
+        </p>
+        <.sidebar_link href={~p"/tech/tickets"} icon="hero-ticket" label="My Tickets" />
+      <% end %>
+
+      <%= if @current_scope && @current_scope.user.role == "resident" do %>
+        <p class="px-3 mb-2 text-xs font-semibold text-base-content/50 uppercase tracking-wider">
+          Main Menu
+        </p>
+        <.sidebar_link href={~p"/my/tickets"} icon="hero-ticket" label="My Tickets" />
+      <% end %>
     </nav>
 
     <!-- User section -->

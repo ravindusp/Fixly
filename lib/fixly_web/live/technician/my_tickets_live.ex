@@ -2,7 +2,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   use FixlyWeb, :live_view
 
   alias Fixly.Tickets
-  alias Fixly.Tickets.Ticket
+  alias Fixly.Tickets.{Ticket, StatusMachine}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -16,6 +16,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
       |> assign(:cursor, nil)
       |> assign(:has_more, false)
       |> assign(:ticket_count, 0)
+      |> allow_upload(:proof, accept: ~w(.jpg .jpeg .png .webp), max_entries: 5, max_file_size: 10_000_000)
       |> reload_data()
 
     {:ok, socket}
@@ -39,6 +40,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
           id={dom_id}
           ticket={ticket}
           expanded={@selected_ticket_id == ticket.id}
+          uploads={@uploads}
         />
       </div>
 
@@ -72,6 +74,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   attr :id, :string, required: true
   attr :ticket, Ticket, required: true
   attr :expanded, :boolean, default: false
+  attr :uploads, :any, required: true
 
   defp ticket_card(assigns) do
     ~H"""
@@ -159,50 +162,37 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
           </div>
         </div>
 
+        <!-- Upload proof -->
+        <div :if={@expanded} class="px-4 py-3 border-t border-base-200">
+          <p class="text-xs font-medium text-base-content/50 mb-2">Upload Proof of Completion</p>
+          <form id={"upload-#{@ticket.id}"} phx-submit="upload_proof" phx-value-ticket-id={@ticket.id} phx-change="validate_upload">
+            <.live_file_input upload={@uploads.proof} class="file-input file-input-bordered file-input-xs w-full" />
+            <div :for={entry <- @uploads.proof.entries} class="flex items-center gap-2 mt-2 text-xs text-base-content/60">
+              <span>{entry.client_name}</span>
+              <button type="button" phx-click="cancel_upload" phx-value-ref={entry.ref} class="text-error">&times;</button>
+            </div>
+            <button :if={@uploads.proof.entries != []} type="submit" class="btn btn-xs btn-outline btn-primary mt-2">
+              Upload
+            </button>
+          </form>
+        </div>
+
         <!-- Action buttons -->
-        <div class="px-4 py-3 bg-base-200/30 flex gap-2">
+        <div class="px-4 py-3 bg-base-200/30 flex flex-wrap gap-2">
           <button
-            :if={@ticket.status in ["assigned", "triaged"]}
+            :for={s <- StatusMachine.allowed_transitions("technician", @ticket.status)}
             phx-click="update_status"
             phx-value-id={@ticket.id}
-            phx-value-status="in_progress"
-            class="btn btn-sm btn-primary flex-1"
+            phx-value-status={s}
+            class={[
+              "btn btn-sm flex-1",
+              s == "in_progress" && "btn-primary",
+              s == "on_hold" && "btn-warning btn-outline",
+              s == "completed" && "btn-success"
+            ]}
           >
-            <.icon name="hero-play" class="size-4" />
-            Start Work
-          </button>
-
-          <button
-            :if={@ticket.status == "in_progress"}
-            phx-click="update_status"
-            phx-value-id={@ticket.id}
-            phx-value-status="on_hold"
-            class="btn btn-sm btn-warning btn-outline flex-1"
-          >
-            <.icon name="hero-pause" class="size-4" />
-            On Hold
-          </button>
-
-          <button
-            :if={@ticket.status == "in_progress"}
-            phx-click="update_status"
-            phx-value-id={@ticket.id}
-            phx-value-status="completed"
-            class="btn btn-sm btn-success flex-1"
-          >
-            <.icon name="hero-check" class="size-4" />
-            Complete
-          </button>
-
-          <button
-            :if={@ticket.status == "on_hold"}
-            phx-click="update_status"
-            phx-value-id={@ticket.id}
-            phx-value-status="in_progress"
-            class="btn btn-sm btn-info flex-1"
-          >
-            <.icon name="hero-play" class="size-4" />
-            Resume
+            <.icon name={status_action_icon(s)} class="size-4" />
+            {status_action_label(s)}
           </button>
         </div>
       </div>
@@ -243,6 +233,41 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
     end
   end
 
+  def handle_event("validate_upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :proof, ref)}
+  end
+
+  def handle_event("upload_proof", %{"ticket-id" => ticket_id}, socket) do
+    # Ensure uploads directory exists
+    upload_dir = Path.join(["priv", "static", "uploads", "proof"])
+    File.mkdir_p!(upload_dir)
+
+    uploaded_files =
+      consume_uploaded_entries(socket, :proof, fn %{path: path}, entry ->
+        dest = Path.join(upload_dir, "#{Ecto.UUID.generate()}_#{entry.client_name}")
+        File.cp!(path, dest)
+        {:ok, "/uploads/proof/#{Path.basename(dest)}"}
+      end)
+
+    for file_url <- uploaded_files do
+      Tickets.create_attachment(%{
+        ticket_id: ticket_id,
+        file_url: file_url,
+        file_name: Path.basename(file_url),
+        file_type: "image"
+      })
+    end
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "#{length(uploaded_files)} file(s) uploaded")
+     |> reload_data()}
+  end
+
   def handle_event("toggle_ticket", %{"id" => id}, socket) do
     selected =
       if socket.assigns.selected_ticket_id == id, do: nil, else: id
@@ -252,26 +277,26 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
   def handle_event("update_status", %{"id" => id, "status" => status}, socket) do
     ticket = Tickets.get_ticket!(id)
+    user = socket.assigns.user
 
-    # Handle SLA pause/resume
-    case status do
-      "on_hold" ->
-        Tickets.pause_sla(ticket)
-      "in_progress" when ticket.status == "on_hold" ->
-        Tickets.resume_sla(ticket)
-      _ ->
-        :ok
+    case Tickets.update_ticket_status(ticket, status, user) do
+      {:ok, _} ->
+        Tickets.log_activity(id, "status_change", "Status changed to #{status}", %{
+          from: ticket.status,
+          to: status
+        })
+
+        {:noreply, reload_data(socket)}
+
+      {:error, :unauthorized_transition} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to make this status change")}
+
+      {:error, :proof_required} ->
+        {:noreply, put_flash(socket, :error, "Please upload proof of completion before marking as completed")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update status")}
     end
-
-    {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
-
-    Tickets.log_activity(id, "status_change", "Status changed to #{status}", %{
-      from: ticket.status,
-      to: status
-    })
-
-    # If completed/closed, ticket drops from active list — just reload
-    {:noreply, reload_data(socket)}
   end
 
   # --- Helpers ---
@@ -317,6 +342,16 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
       true -> "text-base-content/50"
     end
   end
+
+  defp status_action_label("in_progress"), do: "Start Work"
+  defp status_action_label("on_hold"), do: "On Hold"
+  defp status_action_label("completed"), do: "Complete"
+  defp status_action_label(s), do: String.capitalize(s)
+
+  defp status_action_icon("in_progress"), do: "hero-play"
+  defp status_action_icon("on_hold"), do: "hero-pause"
+  defp status_action_icon("completed"), do: "hero-check"
+  defp status_action_icon(_), do: "hero-arrow-right"
 
   defp truncate(nil, _), do: ""
   defp truncate(string, max) when byte_size(string) <= max, do: string

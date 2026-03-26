@@ -81,4 +81,28 @@ defmodule Fixly.Accounts.UserNotifier do
     ==============================
     """)
   end
+
+  @doc """
+  Deliver invite instructions to a new user.
+  """
+  def deliver_invite_instructions(user, inviter_name, org_name, url) do
+    deliver(user.email, "You've been invited to #{org_name} on Fixly", """
+
+    ==============================
+
+    Hi #{user.name},
+
+    #{inviter_name} has invited you to join #{org_name} on Fixly as a #{user.role}.
+
+    You can set up your account by visiting the URL below:
+
+    #{url}
+
+    This link will expire in 7 days.
+
+    If you weren't expecting this invitation, you can ignore this email.
+
+    ==============================
+    """)
+  end
 end

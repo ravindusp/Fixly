@@ -17,6 +17,40 @@ defmodule Fixly.Accounts do
     |> Repo.all()
   end
 
+  @doc "List all users for a given organization (all roles)."
+  def list_all_users_by_organization(org_id) do
+    User
+    |> where([u], u.organization_id == ^org_id)
+    |> order_by([u], u.name)
+    |> Repo.all()
+  end
+
+  @doc "List only technicians for a given organization."
+  def list_technicians_by_organization(org_id) do
+    User
+    |> where([u], u.organization_id == ^org_id and u.role == "technician")
+    |> order_by([u], u.name)
+    |> Repo.all()
+  end
+
+  @doc "List pending invite tokens for a given organization."
+  def list_pending_invites(org_id) do
+    from(t in UserToken,
+      join: u in User,
+      on: t.user_id == u.id,
+      where: t.context == "invite" and u.organization_id == ^org_id and is_nil(u.confirmed_at),
+      select: %{
+        id: t.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        inserted_at: t.inserted_at
+      },
+      order_by: [desc: t.inserted_at]
+    )
+    |> Repo.all()
+  end
+
   ## Database getters
 
   @doc """
@@ -85,8 +119,16 @@ defmodule Fixly.Accounts do
   """
   def register_user(attrs) do
     %User{}
-    |> User.email_changeset(attrs)
+    |> User.registration_changeset(attrs)
+    |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
     |> Repo.insert()
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking registration changes.
+  """
+  def change_user_registration(user, attrs \\ %{}) do
+    User.registration_changeset(user, attrs, validate_unique: false, hash_password: false)
   end
 
   ## Settings
@@ -288,6 +330,62 @@ defmodule Fixly.Accounts do
   def delete_user_session_token(token) do
     Repo.delete_all(from(UserToken, where: [token: ^token, context: "session"]))
     :ok
+  end
+
+  ## Invites
+
+  @doc """
+  Creates an invited user (no password) and generates an invite token.
+  Returns `{:ok, {user, encoded_token}}` or `{:error, changeset}`.
+  """
+  def invite_user(attrs, _invited_by_user) do
+    Repo.transact(fn ->
+      changeset = User.invite_changeset(%User{}, attrs)
+
+      with {:ok, user} <- Repo.insert(changeset) do
+        {encoded_token, user_token} = UserToken.build_invite_token(user)
+        Repo.insert!(user_token)
+        {:ok, {user, encoded_token}}
+      end
+    end)
+  end
+
+  @doc """
+  Gets a user by invite token. Returns the user or nil.
+  """
+  def get_user_by_invite_token(token) do
+    with {:ok, query} <- UserToken.verify_invite_token_query(token),
+         {user, _token} <- Repo.one(query) do
+      user
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Accepts an invite: sets password, confirms user, deletes invite token.
+  Returns `{:ok, user}` or `{:error, changeset}`.
+  """
+  def accept_invite(token, password_attrs) do
+    Repo.transact(fn ->
+      with {:ok, query} <- UserToken.verify_invite_token_query(token),
+           {user, db_token} <- Repo.one(query) do
+        user
+        |> User.password_changeset(password_attrs)
+        |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
+        |> Repo.update()
+        |> case do
+          {:ok, user} ->
+            Repo.delete!(db_token)
+            {:ok, user}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+      else
+        _ -> {:error, :invalid_token}
+      end
+    end)
   end
 
   ## Token helper

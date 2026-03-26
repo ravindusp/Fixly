@@ -194,7 +194,31 @@ defmodule FixlyWeb.UserAuth do
     end
   end
 
-  defp signed_in_path(_conn), do: ~p"/"
+  @doc """
+  Returns the post-login redirect path based on the user's role.
+  """
+  def signed_in_path(conn) do
+    case conn.assigns[:current_scope] do
+      %{user: %{role: role}} when role in ["super_admin", "org_admin"] -> ~p"/admin"
+      %{user: %{role: "contractor_admin"}} -> ~p"/contractor/tickets"
+      %{user: %{role: "technician"}} -> ~p"/tech/tickets"
+      %{user: %{role: "resident"}} -> ~p"/my/tickets"
+      _ -> ~p"/"
+    end
+  end
+
+  @doc """
+  Returns the home path for a given user role.
+  """
+  def home_path_for_role(role) do
+    case role do
+      r when r in ["super_admin", "org_admin"] -> ~p"/admin"
+      "contractor_admin" -> ~p"/contractor/tickets"
+      "technician" -> ~p"/tech/tickets"
+      "resident" -> ~p"/my/tickets"
+      _ -> ~p"/"
+    end
+  end
 
   @doc """
   Plug for routes that require the user to be authenticated.
@@ -208,6 +232,34 @@ defmodule FixlyWeb.UserAuth do
       |> maybe_store_return_to()
       |> redirect(to: ~p"/users/log-in")
       |> halt()
+    end
+  end
+
+  @doc """
+  Plug for routes that require a specific role.
+
+  Usage in router:
+      plug :require_role, ["org_admin", "super_admin"]
+  """
+  def require_role(conn, roles) when is_list(roles) do
+    user = conn.assigns[:current_scope] && conn.assigns.current_scope.user
+
+    cond do
+      is_nil(user) ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/users/log-in")
+        |> halt()
+
+      user.role in roles ->
+        conn
+
+      true ->
+        conn
+        |> put_flash(:error, "You are not authorized to access this page.")
+        |> redirect(to: home_path_for_role(user.role))
+        |> halt()
     end
   end
 
@@ -238,6 +290,31 @@ defmodule FixlyWeb.UserAuth do
 
   def on_mount(:mount_current_scope, _params, session, socket) do
     {:cont, mount_current_scope(socket, session)}
+  end
+
+  def on_mount({:require_role, roles}, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+
+    cond do
+      is_nil(socket.assigns.current_scope) || is_nil(socket.assigns.current_scope.user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log-in")
+
+        {:halt, socket}
+
+      socket.assigns.current_scope.user.role in roles ->
+        {:cont, socket}
+
+      true ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You are not authorized to access this page.")
+          |> Phoenix.LiveView.redirect(to: home_path_for_role(socket.assigns.current_scope.user.role))
+
+        {:halt, socket}
+    end
   end
 
   defp mount_current_scope(socket, session) do

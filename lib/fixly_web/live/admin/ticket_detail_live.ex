@@ -2,8 +2,7 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   use FixlyWeb, :live_view
 
   alias Fixly.Tickets
-  alias Fixly.Tickets.Ticket
-  alias Fixly.Accounts
+  alias Fixly.Tickets.{Ticket, StatusMachine}
   alias Fixly.Organizations
 
   @impl true
@@ -13,10 +12,6 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
     ticket = Tickets.get_ticket!(id)
     comments = Tickets.list_comments(id)
 
-    # Load users and contractor orgs for assignment dropdowns
-    internal_users =
-      if org_id, do: Accounts.list_users_by_organization(org_id), else: []
-
     contractor_orgs =
       if org_id, do: Organizations.list_contractor_orgs(org_id), else: []
 
@@ -25,7 +20,6 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
       |> assign(:page_title, ticket.reference_number)
       |> assign(:ticket, ticket)
       |> assign(:comments, comments)
-      |> assign(:internal_users, internal_users)
       |> assign(:contractor_orgs, contractor_orgs)
       |> assign(:current_user, user)
       |> assign(:comment_body, "")
@@ -92,7 +86,6 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
           <.status_controls ticket={@ticket} />
           <.assignment_section
             ticket={@ticket}
-            internal_users={@internal_users}
             contractor_orgs={@contractor_orgs}
           />
           <.sla_card ticket={@ticket} />
@@ -416,7 +409,6 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   end
 
   attr :ticket, Ticket, required: true
-  attr :internal_users, :list, required: true
   attr :contractor_orgs, :list, required: true
 
   defp assignment_section(assigns) do
@@ -468,26 +460,7 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
           </select>
         </div>
 
-        <!-- Assign to internal user -->
-        <div>
-          <label class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-1.5 block">
-            Assign to Technician
-          </label>
-          <select
-            phx-change="assign_to_user"
-            name="user_id"
-            class="select select-bordered select-sm w-full"
-          >
-            <option value="">Select technician...</option>
-            <option
-              :for={user <- @internal_users}
-              value={user.id}
-              selected={@ticket.assigned_to_user_id == user.id}
-            >
-              {user.name || user.email}
-            </option>
-          </select>
-        </div>
+        <!-- Technician assignment is managed by the contractor admin -->
       </div>
     </div>
     """
@@ -633,8 +606,9 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   def handle_event("update_status", %{"status" => new_status}, socket) do
     ticket = socket.assigns.ticket
     old_status = ticket.status
+    user = socket.assigns.current_user
 
-    case Tickets.update_ticket(ticket, %{status: new_status}) do
+    case Tickets.update_ticket_status(ticket, new_status, user) do
       {:ok, updated_ticket} ->
         Tickets.log_activity(ticket.id, "status_change", "Status changed from #{old_status} to #{new_status}", %{
           field: "status",
@@ -651,6 +625,12 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
          |> assign(:comments, comments)
          |> put_flash(:info, "Status updated to #{status_label(new_status)}")}
 
+      {:error, :unauthorized_transition} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to make this status change")}
+
+      {:error, :proof_required} ->
+        {:noreply, put_flash(socket, :error, "Proof of completion required. Please upload photos before marking as completed.")}
+
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to update status")}
     end
@@ -662,8 +642,9 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
 
   def handle_event("assign_to_org", %{"org_id" => org_id}, socket) do
     ticket = socket.assigns.ticket
+    user = socket.assigns.current_user
 
-    case Tickets.assign_ticket(ticket, %{assigned_to_org_id: org_id}) do
+    case Tickets.assign_to_contractor_org(ticket, org_id, user) do
       {:ok, updated_ticket} ->
         updated_ticket = Tickets.get_ticket!(updated_ticket.id)
         org_name = if updated_ticket.assigned_to_org, do: updated_ticket.assigned_to_org.name, else: "contractor"
@@ -681,38 +662,11 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
          |> assign(:comments, comments)
          |> put_flash(:info, "Assigned to #{org_name}")}
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to assign ticket")}
-    end
-  end
+      {:error, :no_partnership} ->
+        {:noreply, put_flash(socket, :error, "No active partnership with this contractor")}
 
-  def handle_event("assign_to_user", %{"user_id" => ""}, socket) do
-    {:noreply, socket}
-  end
-
-  def handle_event("assign_to_user", %{"user_id" => user_id}, socket) do
-    ticket = socket.assigns.ticket
-
-    case Tickets.assign_ticket(ticket, %{assigned_to_user_id: user_id}) do
-      {:ok, updated_ticket} ->
-        updated_ticket = Tickets.get_ticket!(updated_ticket.id)
-        user_name =
-          if updated_ticket.assigned_to_user,
-            do: updated_ticket.assigned_to_user.name || updated_ticket.assigned_to_user.email,
-            else: "technician"
-
-        Tickets.log_activity(ticket.id, "assignment", "Assigned to #{user_name}", %{
-          field: "assigned_to_user_id",
-          new_value: user_id
-        })
-
-        comments = Tickets.list_comments(ticket.id)
-
-        {:noreply,
-         socket
-         |> assign(:ticket, updated_ticket)
-         |> assign(:comments, comments)
-         |> put_flash(:info, "Assigned to #{user_name}")}
+      {:error, :unauthorized} ->
+        {:noreply, put_flash(socket, :error, "Only admins can assign to contractors")}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to assign ticket")}
@@ -806,16 +760,9 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   defp status_label("closed"), do: "Closed"
   defp status_label(other), do: String.capitalize(other)
 
-  # Status workflow transitions
-  defp next_statuses("created"), do: ["triaged"]
-  defp next_statuses("triaged"), do: ["assigned"]
-  defp next_statuses("assigned"), do: ["in_progress"]
-  defp next_statuses("in_progress"), do: ["completed"]
-  defp next_statuses("on_hold"), do: ["in_progress"]
-  defp next_statuses("completed"), do: ["reviewed", "in_progress"]
-  defp next_statuses("reviewed"), do: ["closed"]
-  defp next_statuses("closed"), do: []
-  defp next_statuses(_), do: []
+  defp next_statuses(status) do
+    StatusMachine.allowed_transitions("org_admin", status)
+  end
 
   defp status_action_label("triaged"), do: "Mark as Triaged"
   defp status_action_label("assigned"), do: "Mark as Assigned"

@@ -3,7 +3,7 @@ defmodule Fixly.Tickets do
 
   import Ecto.Query
   alias Fixly.Repo
-  alias Fixly.Tickets.{Ticket, TicketAttachment, TicketComment, SLAEscalation}
+  alias Fixly.Tickets.{Ticket, TicketAttachment, TicketComment, SLAEscalation, StatusMachine}
 
   # --- Tickets ---
 
@@ -313,6 +313,85 @@ defmodule Fixly.Tickets do
     ticket
     |> Ticket.sla_changeset(%{sla_breached: true})
     |> Repo.update()
+  end
+
+  @doc """
+  Update ticket status with role-based transition validation and proof-of-completion gate.
+
+  Returns:
+    - `{:ok, ticket}` on success
+    - `{:error, :unauthorized_transition}` if the role can't make this transition
+    - `{:error, :proof_required}` if completing without attachments
+    - `{:error, changeset}` on other validation failure
+  """
+  def update_ticket_status(%Ticket{} = ticket, new_status, user) do
+    role = user.role
+    current_status = ticket.status
+
+    cond do
+      !StatusMachine.can_transition?(role, current_status, new_status) ->
+        {:error, :unauthorized_transition}
+
+      StatusMachine.requires_proof?(new_status) && count_attachments(ticket.id) == 0 ->
+        {:error, :proof_required}
+
+      true ->
+        # Handle SLA pause/resume
+        case new_status do
+          "on_hold" -> pause_sla(ticket)
+          "in_progress" when current_status == "on_hold" -> resume_sla(ticket)
+          _ -> :ok
+        end
+
+        update_ticket(ticket, %{status: new_status})
+    end
+  end
+
+  @doc "Count attachments for a ticket."
+  def count_attachments(ticket_id) do
+    TicketAttachment
+    |> where([a], a.ticket_id == ^ticket_id)
+    |> Repo.aggregate(:count, :id)
+  end
+
+  # --- Assignment with authorization ---
+
+  @doc """
+  Assign a ticket to a contractor org. Validates the user is an admin and the partnership exists.
+  """
+  def assign_to_contractor_org(%Ticket{} = ticket, org_id, admin_user) do
+    cond do
+      admin_user.role not in ["super_admin", "org_admin"] ->
+        {:error, :unauthorized}
+
+      !Fixly.Organizations.partnership_exists?(ticket.organization_id, org_id) ->
+        {:error, :no_partnership}
+
+      true ->
+        assign_ticket(ticket, %{assigned_to_org_id: org_id})
+    end
+  end
+
+  @doc """
+  Assign a ticket to a technician. Validates the contractor admin owns the ticket
+  and the technician belongs to their org.
+  """
+  def assign_to_technician(%Ticket{} = ticket, user_id, contractor_admin) do
+    tech = Fixly.Accounts.get_user!(user_id)
+
+    cond do
+      contractor_admin.role != "contractor_admin" ->
+        {:error, :unauthorized}
+
+      ticket.assigned_to_org_id != contractor_admin.organization_id ->
+        {:error, :not_your_ticket}
+
+      tech.organization_id != contractor_admin.organization_id ->
+        {:error, :tech_not_in_org}
+
+      true ->
+        assign_ticket(ticket, %{assigned_to_user_id: user_id})
+    end
   end
 
   # --- Comments ---
