@@ -57,6 +57,7 @@
         :let={f}
         for={@changeset}
         as={:user}
+        method="post"
         action={~p"/users/invite/#{@token}"}
         class="auth-form space-y-6"
       >
