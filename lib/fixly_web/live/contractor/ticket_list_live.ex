@@ -31,127 +31,125 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="space-y-6">
-      <!-- Stats -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <.stat_card label="Assigned" value={@counts.total} icon="hero-inbox-stack" color="primary" />
-        <.stat_card label="Open" value={@counts.open} icon="hero-inbox" color="success" />
-        <.stat_card label="In Progress" value={@counts.in_progress} icon="hero-arrow-path" color="info" />
-        <.stat_card label="On Hold" value={@counts.on_hold} icon="hero-pause-circle" color="warning" />
-      </div>
-
-      <!-- Main content with optional side panel -->
-      <div class="flex gap-6 items-start">
-        <!-- Ticket list / kanban -->
-        <div class="flex-1 min-w-0">
-          <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
-            <div class="flex items-center justify-between px-5 py-3.5 border-b border-base-300">
-              <h2 class="text-sm font-semibold text-base-content">Tickets Assigned to Your Team</h2>
-              <div class="flex items-center gap-1 bg-base-200 rounded-lg p-0.5">
-                <button
-                  phx-click="set_view_mode"
-                  phx-value-mode="list"
-                  class={["btn btn-xs gap-1.5", @view_mode == "list" && "btn-active", @view_mode != "list" && "btn-ghost"]}
-                >
-                  <.icon name="hero-list-bullet" class="size-3.5" />
-                  List
-                </button>
-                <button
-                  phx-click="set_view_mode"
-                  phx-value-mode="kanban"
-                  class={["btn btn-xs gap-1.5", @view_mode == "kanban" && "btn-active", @view_mode != "kanban" && "btn-ghost"]}
-                >
-                  <.icon name="hero-view-columns" class="size-3.5" />
-                  Kanban
-                </button>
-              </div>
-            </div>
-
-            <!-- List view -->
-            <div :if={@view_mode == "list"}>
-              <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
-                <span>Ticket</span>
-                <span>Location</span>
-                <span>Priority</span>
-                <span>Status</span>
-                <span>Assigned To</span>
-                <span></span>
-              </div>
-
-              <div id="contractor-tickets-stream" phx-update="stream">
-                <div
-                  :for={{dom_id, ticket} <- @streams.tickets}
-                  id={dom_id}
-                  phx-click="select_ticket"
-                  phx-value-id={ticket.id}
-                  class={[
-                    "grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center cursor-pointer transition-colors",
-                    @selected_ticket && @selected_ticket.id == ticket.id && "bg-primary/5",
-                    "hover:bg-base-200/30"
-                  ]}
-                >
-                  <div class="min-w-0">
-                    <p class="text-sm font-medium text-base-content truncate">{truncate(ticket.description, 55)}</p>
-                    <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
-                  </div>
-                  <div class="min-w-0">
-                    <p :if={ticket.location} class="text-sm text-base-content/70 truncate">{ticket.location.name}</p>
-                    <p :if={!ticket.location} class="text-sm text-base-content/30">—</p>
-                  </div>
-                  <div><.priority_badge priority={ticket.priority} /></div>
-                  <div><.status_badge status={ticket.status} /></div>
-                  <div>
-                    <%= if ticket.assigned_to_user do %>
-                      <span class="text-sm text-base-content/70">{ticket.assigned_to_user.name || ticket.assigned_to_user.email}</span>
-                    <% else %>
-                      <span class="text-xs text-base-content/40">Unassigned</span>
-                    <% end %>
-                  </div>
-                  <div class="text-right">
-                    <.link navigate={~p"/contractor/tickets/#{ticket.id}"} class="btn btn-xs btn-ghost">
-                      View
-                    </.link>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                :if={@has_more}
-                id="contractor-tickets-scroll"
-                phx-hook="InfiniteScroll"
-                data-has-more={to_string(@has_more)}
-                class="flex justify-center py-4"
-              >
-                <span class="loading loading-spinner loading-sm text-base-content/30"></span>
-              </div>
-            </div>
-
-            <!-- Kanban view -->
-            <div :if={@view_mode == "kanban"} class="p-5">
-              <.kanban_board
-                grouped={@grouped}
-                kanban_loading={@kanban_loading}
-                selected_id={@selected_ticket && @selected_ticket.id}
-              />
-            </div>
-
-            <div :if={@counts.total == 0 && @view_mode == "list"} class="flex flex-col items-center justify-center py-16 text-center">
-              <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
-                <.icon name="hero-inbox" class="size-6 text-base-content/30" />
-              </div>
-              <h3 class="text-base font-semibold text-base-content mb-1">No tickets assigned yet</h3>
-              <p class="text-sm text-base-content/50">Tickets will appear here when the property manager assigns work to your team.</p>
-            </div>
-          </div>
+    <div class="flex gap-6 h-full">
+      <!-- Main content -->
+      <div class="flex-1 min-w-0 space-y-6">
+        <!-- Stats -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <.stat_card label="Assigned" value={@counts.total} icon="hero-inbox-stack" color="primary" />
+          <.stat_card label="Open" value={@counts.open} icon="hero-inbox" color="success" />
+          <.stat_card label="In Progress" value={@counts.in_progress} icon="hero-arrow-path" color="info" />
+          <.stat_card label="On Hold" value={@counts.on_hold} icon="hero-pause-circle" color="warning" />
         </div>
 
-        <!-- Side panel -->
-        <.ticket_panel
-          :if={@selected_ticket}
-          ticket={@selected_ticket}
-          technicians={@technicians}
-        />
+        <!-- Ticket list / kanban -->
+        <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+          <div class="flex items-center justify-between px-5 py-3.5 border-b border-base-300">
+            <h2 class="text-sm font-semibold text-base-content">Tickets Assigned to Your Team</h2>
+            <div class="flex items-center gap-1 bg-base-200 rounded-lg p-0.5">
+              <button
+                phx-click="set_view_mode"
+                phx-value-mode="list"
+                class={["btn btn-xs gap-1.5", @view_mode == "list" && "btn-active", @view_mode != "list" && "btn-ghost"]}
+              >
+                <.icon name="hero-list-bullet" class="size-3.5" />
+                List
+              </button>
+              <button
+                phx-click="set_view_mode"
+                phx-value-mode="kanban"
+                class={["btn btn-xs gap-1.5", @view_mode == "kanban" && "btn-active", @view_mode != "kanban" && "btn-ghost"]}
+              >
+                <.icon name="hero-view-columns" class="size-3.5" />
+                Kanban
+              </button>
+            </div>
+          </div>
+
+          <!-- List view -->
+          <div :if={@view_mode == "list"}>
+            <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+              <span>Ticket</span>
+              <span>Location</span>
+              <span>Priority</span>
+              <span>Status</span>
+              <span>Assigned To</span>
+              <span></span>
+            </div>
+
+            <div id="contractor-tickets-stream" phx-update="stream">
+              <div
+                :for={{dom_id, ticket} <- @streams.tickets}
+                id={dom_id}
+                phx-click="select_ticket"
+                phx-value-id={ticket.id}
+                class={[
+                  "grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center cursor-pointer transition-colors",
+                  @selected_ticket && @selected_ticket.id == ticket.id && "bg-primary/5",
+                  "hover:bg-base-200/30"
+                ]}
+              >
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-base-content truncate">{truncate(ticket.description, 55)}</p>
+                  <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
+                </div>
+                <div class="min-w-0">
+                  <p :if={ticket.location} class="text-sm text-base-content/70 truncate">{ticket.location.name}</p>
+                  <p :if={!ticket.location} class="text-sm text-base-content/30">—</p>
+                </div>
+                <div><.priority_badge priority={ticket.priority} /></div>
+                <div><.status_badge status={ticket.status} /></div>
+                <div>
+                  <%= if ticket.assigned_to_user do %>
+                    <span class="text-sm text-base-content/70">{ticket.assigned_to_user.name || ticket.assigned_to_user.email}</span>
+                  <% else %>
+                    <span class="text-xs text-base-content/40">Unassigned</span>
+                  <% end %>
+                </div>
+                <div class="text-right">
+                  <.link navigate={~p"/contractor/tickets/#{ticket.id}"} class="btn btn-xs btn-ghost">
+                    View
+                  </.link>
+                </div>
+              </div>
+            </div>
+
+            <div
+              :if={@has_more}
+              id="contractor-tickets-scroll"
+              phx-hook="InfiniteScroll"
+              data-has-more={to_string(@has_more)}
+              class="flex justify-center py-4"
+            >
+              <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+            </div>
+          </div>
+
+          <!-- Kanban view -->
+          <div :if={@view_mode == "kanban"} class="p-5">
+            <.kanban_board
+              grouped={@grouped}
+              kanban_loading={@kanban_loading}
+              selected_id={@selected_ticket && @selected_ticket.id}
+            />
+          </div>
+
+          <div :if={@counts.total == 0 && @view_mode == "list"} class="flex flex-col items-center justify-center py-16 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
+              <.icon name="hero-inbox" class="size-6 text-base-content/30" />
+            </div>
+            <h3 class="text-base font-semibold text-base-content mb-1">No tickets assigned yet</h3>
+            <p class="text-sm text-base-content/50">Tickets will appear here when the property manager assigns work to your team.</p>
+          </div>
+        </div>
       </div>
+
+      <!-- Side panel -->
+      <.ticket_panel
+        :if={@selected_ticket}
+        ticket={@selected_ticket}
+        technicians={@technicians}
+      />
     </div>
     """
   end
