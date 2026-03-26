@@ -282,13 +282,9 @@ defmodule FixlyWeb.Admin.AssetsLive do
                 </div>
                 <div><span class="badge badge-sm badge-ghost">{String.capitalize(asset.category || "")}</span></div>
                 <div class="min-w-0">
-                  <%= if asset.location do %>
-                    <% root = root_location(asset.location) %>
-                    <p class="text-sm text-base-content/70 truncate">{root.name}</p>
-                    <p :if={root.id != asset.location.id} class="text-[10px] text-base-content/40 truncate">{asset.location.name}</p>
-                  <% else %>
-                    <p class="text-sm text-base-content/40">—</p>
-                  <% end %>
+                  <p :if={asset.location && asset.location.root_location} class="text-sm text-base-content/70 truncate">{asset.location.root_location.name}</p>
+                  <p :if={asset.location && asset.location.depth > 0} class="text-[10px] text-base-content/40 truncate">{asset.location.name}</p>
+                  <p :if={!asset.location} class="text-sm text-base-content/40">—</p>
                 </div>
                 <div><.status_pill status={asset.status} /></div>
                 <div class="text-sm text-base-content/60">{asset.ticket_count}</div>
@@ -705,11 +701,6 @@ defmodule FixlyWeb.Admin.AssetsLive do
   defp status_label("out_of_service"), do: "Out of Service"
   defp status_label("decommissioned"), do: "Decommissioned"
   defp status_label(other), do: String.capitalize(to_string(other))
-
-  # Walk up the parent chain to find the root location
-  defp root_location(%{parent: nil} = loc), do: loc
-  defp root_location(%{parent: %Ecto.Association.NotLoaded{}} = loc), do: loc
-  defp root_location(%{parent: parent}), do: root_location(parent)
 
   # Category dot colors for combobox
   defp category_dot_color("hvac"), do: "bg-red-500"

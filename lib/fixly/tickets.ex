@@ -13,7 +13,7 @@ defmodule Fixly.Tickets do
     |> where([t], t.organization_id == ^org_id)
     |> order_by([t], desc: t.inserted_at)
     |> limit(^limit)
-    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
     |> Repo.all()
   end
 
@@ -24,7 +24,7 @@ defmodule Fixly.Tickets do
     |> where([t], t.sla_breached == true)
     |> where([t], t.status not in ["completed", "reviewed", "closed"])
     |> order_by([t], asc: t.sla_deadline)
-    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
     |> Repo.all()
   end
 
@@ -44,7 +44,7 @@ defmodule Fixly.Tickets do
     Ticket
     |> where([t], t.organization_id == ^org_id)
     |> apply_db_filters(filters)
-    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
     |> Fixly.Pagination.paginate_desc(cursor: cursor)
   end
 
@@ -65,7 +65,7 @@ defmodule Fixly.Tickets do
         |> apply_db_filters(filters)
         |> order_by([t], desc: t.inserted_at)
         |> limit(^per_status_limit)
-        |> preload([:location, :assigned_to_user, :assigned_to_org])
+        |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
         |> Repo.all()
 
       total = Map.get(total_counts, status, 0)
@@ -82,7 +82,7 @@ defmodule Fixly.Tickets do
     |> order_by([t], desc: t.inserted_at)
     |> offset(^offset)
     |> limit(^limit)
-    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
     |> Repo.all()
   end
 
@@ -120,7 +120,7 @@ defmodule Fixly.Tickets do
     |> where([t], t.organization_id == ^org_id)
     |> apply_filters(opts)
     |> order_by([t], [desc: t.inserted_at])
-    |> preload([:location, :assigned_to_user, :assigned_to_org])
+    |> preload([[location: :root_location], :assigned_to_user, :assigned_to_org])
     |> Repo.all()
   end
 

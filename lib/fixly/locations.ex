@@ -48,11 +48,12 @@ defmodule Fixly.Locations do
       path
       |> String.split(".")
       |> Enum.scan(fn segment, acc -> acc <> "." <> segment end)
+      |> List.delete(path)
 
     # Include all ancestors by querying the path prefix
     Location
     |> where([l], l.organization_id == ^org_id)
-    |> where([l], l.path in ^ancestor_paths or l.path == ^path)
+    |> where([l], l.path in ^ancestor_paths)
     |> order_by([l], l.depth)
     |> Repo.all()
   end
@@ -71,7 +72,7 @@ defmodule Fixly.Locations do
   def create_location(attrs) do
     parent_id = Map.get(attrs, :parent_id) || Map.get(attrs, "parent_id")
 
-    {depth, attrs} =
+    {depth, root_location_id, attrs} =
       if parent_id do
         parent = get_location!(parent_id)
 
@@ -87,9 +88,9 @@ defmodule Fixly.Locations do
           end
 
         attrs = Map.put(attrs, :metadata, inherited_metadata)
-        {parent.depth + 1, attrs}
+        {parent.depth + 1, parent.root_location_id || parent.id, attrs}
       else
-        {0, attrs}
+        {0, nil, attrs}
       end
 
     result =
@@ -98,13 +99,15 @@ defmodule Fixly.Locations do
       |> Ecto.Changeset.put_change(:depth, depth)
       |> Repo.insert()
 
-    # After insert, calculate and set the ltree path
+    # After insert, set the ltree path and root_location_id
     case result do
       {:ok, location} ->
         path = calculate_path(location)
+        # Root locations point to themselves
+        root_id = root_location_id || location.id
 
         location
-        |> Ecto.Changeset.change(%{path: path})
+        |> Ecto.Changeset.change(%{path: path, root_location_id: root_id})
         |> Repo.update()
 
       error ->

@@ -15,6 +15,7 @@ defmodule Fixly.Locations.Location do
     field :metadata, :map, default: %{}
 
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
+    belongs_to :root_location, __MODULE__, foreign_key: :root_location_id
     belongs_to :organization, Fixly.Organizations.Organization
 
     has_many :children, __MODULE__, foreign_key: :parent_id

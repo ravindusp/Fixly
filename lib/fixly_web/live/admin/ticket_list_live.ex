@@ -1040,7 +1040,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
       </div>
       <div><.status_badge status={@ticket.status} /></div>
       <div class="min-w-0">
-        <p :if={@ticket.location} class="text-sm text-base-content/70 truncate">{@ticket.location.name}</p>
+        <p :if={@ticket.location && @ticket.location.root_location} class="text-sm text-base-content/70 truncate">{@ticket.location.root_location.name}</p>
+        <p :if={@ticket.location && @ticket.location.depth > 0} class="text-[10px] text-base-content/40 truncate">{@ticket.location.name}</p>
         <p :if={!@ticket.location} class="text-sm text-base-content/30">—</p>
       </div>
       <div>
@@ -1156,7 +1157,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       <p class="text-sm font-medium text-base-content leading-snug mb-2">{truncate(@ticket.description, 80)}</p>
       <div :if={@ticket.location} class="flex items-center gap-1 text-xs text-base-content/50 mb-3">
         <.icon name="hero-map-pin" class="size-3" />
-        <span class="truncate">{@ticket.location.name}</span>
+        <span class="truncate">{@ticket.location.root_location && @ticket.location.root_location.name}<span :if={@ticket.location.depth > 0} class="text-base-content/30"> &gt; {@ticket.location.name}</span></span>
       </div>
       <div class="flex items-center justify-between">
         <div :if={@ticket.assigned_to_user} class="flex items-center gap-1.5">
@@ -1166,7 +1167,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
             </span>
           </div>
         </div>
-        <span :if={!@ticket.assigned_to_user} class="text-[10px] text-base-content/30">Unassigned</span>
+        <span :if={!@ticket.assigned_to_user && @ticket.assigned_to_org} class="text-[10px] text-base-content/50">{@ticket.assigned_to_org.name}</span>
+        <span :if={!@ticket.assigned_to_user && !@ticket.assigned_to_org} class="text-[10px] text-base-content/30">Unassigned</span>
         <span class="text-xs text-base-content/40">{format_date(@ticket.inserted_at)}</span>
       </div>
     </div>
@@ -1207,7 +1209,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   attr :status, :string, required: true
   defp status_badge(assigns) do
     ~H"""
-    <span class={["badge badge-sm font-medium", status_badge_class(@status)]}>{status_label(@status)}</span>
+    <span class={["badge badge-sm font-medium whitespace-nowrap", status_badge_class(@status)]}>{status_label(@status)}</span>
     """
   end
 
@@ -2034,6 +2036,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp truncate(nil, _), do: ""
   defp truncate(string, max) when byte_size(string) <= max, do: string
   defp truncate(string, max), do: String.slice(string, 0, max) <> "..."
+
 
   # --- Filter helpers ---
 
