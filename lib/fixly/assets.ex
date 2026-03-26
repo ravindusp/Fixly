@@ -216,12 +216,15 @@ defmodule Fixly.Assets do
 
   @doc "List all tickets linked to an asset."
   def list_tickets_for_asset(asset_id) do
-    TicketAssetLink
-    |> where([tal], tal.asset_id == ^asset_id)
-    |> join(:inner, [tal], t in Ticket, on: tal.ticket_id == t.id)
-    |> select([tal, t], t)
-    |> preload([tal, t], [:location, :assigned_to_user, :assigned_to_org])
-    |> order_by([tal, t], desc: t.inserted_at)
+    ticket_ids =
+      TicketAssetLink
+      |> where([tal], tal.asset_id == ^asset_id)
+      |> select([tal], tal.ticket_id)
+
+    Ticket
+    |> where([t], t.id in subquery(ticket_ids))
+    |> order_by([t], desc: t.inserted_at)
+    |> preload([:location, :assigned_to_user, :assigned_to_org])
     |> Repo.all()
   end
 
