@@ -345,6 +345,52 @@ defmodule FixlyWeb.Admin.LocationTreeLive do
         </div>
       </div>
 
+      <!-- Location Map -->
+      <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 border-b border-base-300 flex items-center justify-between">
+          <h4 class="text-sm font-semibold text-base-content flex items-center gap-2">
+            <.icon name="hero-map-pin" class="size-4" />
+            GPS Location
+          </h4>
+          <span :if={@location.metadata["gps_lat"]} class="text-[10px] font-mono text-base-content/40">
+            {@location.metadata["gps_lat"]}, {@location.metadata["gps_lng"]}
+          </span>
+        </div>
+        <div
+          id={"location-map-#{@location.id}"}
+          phx-hook="LocationPicker"
+          phx-update="ignore"
+        >
+          <div
+            data-map
+            data-lat={@location.metadata["gps_lat"]}
+            data-lng={@location.metadata["gps_lng"]}
+            class="w-full h-48"
+            style="z-index: 0;"
+          ></div>
+          <div class="grid grid-cols-2 border-t border-base-300">
+            <button
+              type="button"
+              data-fetch-location
+              class="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/5 transition-colors border-r border-base-300"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+              </svg>
+              Fetch Location
+            </button>
+            <button
+              type="button"
+              data-set-on-map
+              class="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-base-content/60 hover:bg-base-200/50 transition-colors"
+            >
+              <.icon name="hero-arrows-pointing-in" class="size-3.5" />
+              Center Pin
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- QR Code section -->
       <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm p-5">
         <h4 class="text-sm font-semibold text-base-content mb-3">QR Code</h4>
@@ -521,6 +567,25 @@ defmodule FixlyWeb.Admin.LocationTreeLive do
 
   def handle_event("close_qr", _, socket) do
     {:noreply, assign(socket, show_qr: false)}
+  end
+
+  # --- Location GPS ---
+
+  def handle_event("update_coordinates", %{"latitude" => lat, "longitude" => lng}, socket) do
+    location = socket.assigns.selected_location
+    metadata = Map.merge(location.metadata || %{}, %{"gps_lat" => lat, "gps_lng" => lng})
+
+    case Locations.update_location(location, %{metadata: metadata}) do
+      {:ok, updated} ->
+        {:noreply, assign(socket, :selected_location, updated)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save location coordinates")}
+    end
+  end
+
+  def handle_event("location_error", %{"message" => msg}, socket) do
+    {:noreply, put_flash(socket, :error, "Location error: #{msg}")}
   end
 
   # ==========================================
