@@ -22,7 +22,9 @@ defmodule FixlyWeb.UserInviteController do
     end
   end
 
-  def accept(conn, %{"token" => token, "user" => password_params}) do
+  def accept(conn, %{"token" => token} = params) do
+    password_params = params["user"] || %{}
+
     case Accounts.accept_invite(token, password_params) do
       {:ok, user} ->
         conn
