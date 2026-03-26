@@ -283,12 +283,9 @@ defmodule FixlyWeb.Admin.AssetsLive do
                 <div><span class="badge badge-sm badge-ghost">{String.capitalize(asset.category || "")}</span></div>
                 <div class="min-w-0">
                   <%= if asset.location do %>
-                    <%= if asset.location.parent do %>
-                      <p class="text-sm text-base-content/70 truncate">{asset.location.parent.name}</p>
-                      <p class="text-[10px] text-base-content/40 truncate">{asset.location.name}</p>
-                    <% else %>
-                      <p class="text-sm text-base-content/70 truncate">{asset.location.name}</p>
-                    <% end %>
+                    <% parts = if asset.location.path, do: String.split(asset.location.path, " > "), else: [asset.location.name] %>
+                    <p class="text-sm text-base-content/70 truncate">{List.first(parts)}</p>
+                    <p :if={length(parts) > 1} class="text-[10px] text-base-content/40 truncate">{Enum.join(tl(parts), " > ")}</p>
                   <% else %>
                     <p class="text-sm text-base-content/40">—</p>
                   <% end %>
