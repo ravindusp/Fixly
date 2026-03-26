@@ -1856,7 +1856,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       end
     else
       empty_grouped =
-        ~w(created triaged assigned in_progress on_hold completed reviewed closed)
+        ~w(created triaged assigned in_progress on_hold pending_review completed reviewed closed)
         |> Enum.map(fn s -> {s, %{tickets: [], total: 0, has_more: false}} end)
 
       socket
@@ -1922,6 +1922,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp status_actions("assigned"), do: [{"in_progress", "Start Work", "hero-play"}, {"on_hold", "Hold", "hero-pause"}]
   defp status_actions("in_progress"), do: [{"on_hold", "Hold", "hero-pause"}, {"completed", "Complete", "hero-check"}]
   defp status_actions("on_hold"), do: [{"in_progress", "Resume", "hero-play"}, {"completed", "Complete", "hero-check"}]
+  defp status_actions("pending_review"), do: [{"completed", "Approve", "hero-check"}, {"in_progress", "Send Back", "hero-arrow-uturn-left"}]
   defp status_actions("completed"), do: [{"reviewed", "Review", "hero-eye"}, {"closed", "Close", "hero-x-circle"}]
   defp status_actions("reviewed"), do: [{"closed", "Close", "hero-x-circle"}]
   defp status_actions(_), do: []
@@ -1931,6 +1932,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp status_label("assigned"), do: "Assigned"
   defp status_label("in_progress"), do: "In Progress"
   defp status_label("on_hold"), do: "On Hold"
+  defp status_label("pending_review"), do: "Pending Review"
   defp status_label("completed"), do: "Completed"
   defp status_label("reviewed"), do: "Reviewed"
   defp status_label("closed"), do: "Closed"
@@ -1949,6 +1951,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp status_dot_color("assigned"), do: "bg-primary"
   defp status_dot_color("in_progress"), do: "bg-info"
   defp status_dot_color("on_hold"), do: "bg-warning"
+  defp status_dot_color("pending_review"), do: "bg-accent"
   defp status_dot_color("completed"), do: "bg-success"
   defp status_dot_color(_), do: "bg-base-content/30"
 

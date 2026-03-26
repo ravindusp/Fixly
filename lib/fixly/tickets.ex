@@ -53,7 +53,7 @@ defmodule Fixly.Tickets do
   Returns `[{status, %{tickets: [...], total: n, has_more: bool}}, ...]`.
   """
   def list_tickets_by_status(org_id, filters \\ %{}, per_status_limit \\ 20) do
-    statuses = ~w(created triaged assigned in_progress on_hold completed reviewed closed)
+    statuses = ~w(created triaged assigned in_progress on_hold pending_review completed reviewed closed)
 
     # Get total counts per status in one query
     total_counts = count_tickets_by_status(org_id, filters)
@@ -128,7 +128,7 @@ defmodule Fixly.Tickets do
 
   @doc "List contractor tickets grouped by status for kanban."
   def list_contractor_tickets_by_status(contractor_org_id, per_status_limit \\ 20) do
-    statuses = ~w(assigned in_progress on_hold completed)
+    statuses = ~w(assigned in_progress on_hold pending_review completed)
     total_counts = count_contractor_tickets_by_status(contractor_org_id)
 
     Enum.map(statuses, fn status ->

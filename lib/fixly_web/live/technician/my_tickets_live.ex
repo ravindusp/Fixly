@@ -104,6 +104,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
                       ticket.status == "assigned" && "badge-primary badge-outline",
                       ticket.status == "in_progress" && "badge-info",
                       ticket.status == "on_hold" && "badge-warning",
+                      ticket.status == "pending_review" && "badge-accent",
                       ticket.status in ["completed", "reviewed", "closed"] && "badge-ghost"
                     ]}>
                       {status_label(ticket.status)}
@@ -196,6 +197,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
               @ticket.status == "assigned" && "badge-primary badge-outline",
               @ticket.status == "in_progress" && "badge-info",
               @ticket.status == "on_hold" && "badge-warning",
+              @ticket.status == "pending_review" && "badge-accent",
               @ticket.status in ["completed", "reviewed", "closed"] && "badge-ghost"
             ]}>
               {status_label(@ticket.status)}
@@ -533,6 +535,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   defp status_label("assigned"), do: "Assigned"
   defp status_label("in_progress"), do: "In Progress"
   defp status_label("on_hold"), do: "On Hold"
+  defp status_label("pending_review"), do: "Awaiting Review"
   defp status_label("completed"), do: "Completed"
   defp status_label("reviewed"), do: "Reviewed"
   defp status_label("closed"), do: "Closed"
@@ -540,12 +543,12 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
   defp status_action_label("in_progress"), do: "Start Work"
   defp status_action_label("on_hold"), do: "Pause"
-  defp status_action_label("completed"), do: "Mark Complete"
+  defp status_action_label("pending_review"), do: "Submit for Review"
   defp status_action_label(s), do: String.capitalize(s)
 
   defp status_action_icon("in_progress"), do: "hero-play"
   defp status_action_icon("on_hold"), do: "hero-pause"
-  defp status_action_icon("completed"), do: "hero-check"
+  defp status_action_icon("pending_review"), do: "hero-paper-airplane"
   defp status_action_icon(_), do: "hero-arrow-right"
 
   defp comment_author(%{user: %{name: name}}) when is_binary(name) and name != "", do: name

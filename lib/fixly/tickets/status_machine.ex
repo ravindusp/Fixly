@@ -9,9 +9,10 @@ defmodule Fixly.Tickets.StatusMachine do
   @admin_transitions %{
     "created" => ["triaged", "assigned", "in_progress"],
     "triaged" => ["assigned", "in_progress"],
-    "assigned" => ["in_progress", "on_hold", "completed"],
-    "in_progress" => ["on_hold", "completed"],
-    "on_hold" => ["in_progress", "completed"],
+    "assigned" => ["in_progress", "on_hold", "pending_review", "completed"],
+    "in_progress" => ["on_hold", "pending_review", "completed"],
+    "on_hold" => ["in_progress", "pending_review", "completed"],
+    "pending_review" => ["completed", "in_progress"],
     "completed" => ["reviewed", "in_progress"],
     "reviewed" => ["closed", "in_progress"],
     "closed" => []
@@ -19,12 +20,16 @@ defmodule Fixly.Tickets.StatusMachine do
 
   @contractor_transitions %{
     "assigned" => ["in_progress"],
-    "in_progress" => ["on_hold", "completed"],
-    "on_hold" => ["in_progress"]
+    "in_progress" => ["on_hold", "pending_review"],
+    "on_hold" => ["in_progress"],
+    "pending_review" => ["completed", "in_progress"]
   }
 
-  # Technicians have same transitions as contractors
-  @technician_transitions @contractor_transitions
+  @technician_transitions %{
+    "assigned" => ["in_progress"],
+    "in_progress" => ["on_hold", "pending_review"],
+    "on_hold" => ["in_progress"]
+  }
 
   @doc """
   Returns the list of valid next statuses for a given role and current status.
@@ -43,10 +48,9 @@ defmodule Fixly.Tickets.StatusMachine do
 
   @doc """
   Returns true if transitioning to the target status requires proof (attachments).
-  Only "completed" requires proof.
   """
   def requires_proof?(target_status) do
-    target_status == "completed"
+    target_status in ["pending_review", "completed"]
   end
 
   defp transitions_for_role(role) when role in ["super_admin", "org_admin"], do: @admin_transitions

@@ -755,6 +755,7 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   defp status_label("assigned"), do: "Assigned"
   defp status_label("in_progress"), do: "In Progress"
   defp status_label("on_hold"), do: "On Hold"
+  defp status_label("pending_review"), do: "Pending Review"
   defp status_label("completed"), do: "Completed"
   defp status_label("reviewed"), do: "Reviewed"
   defp status_label("closed"), do: "Closed"

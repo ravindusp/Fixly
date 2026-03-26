@@ -653,7 +653,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
       end
     else
       empty_grouped =
-        ~w(assigned in_progress on_hold completed)
+        ~w(assigned in_progress on_hold pending_review completed)
         |> Enum.map(fn s -> {s, %{tickets: [], total: 0, has_more: false}} end)
 
       socket
@@ -666,8 +666,9 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   end
 
   defp contractor_status_actions("assigned"), do: [{"in_progress", "Start Work", "hero-play"}]
-  defp contractor_status_actions("in_progress"), do: [{"on_hold", "Pause", "hero-pause"}, {"completed", "Complete", "hero-check"}]
+  defp contractor_status_actions("in_progress"), do: [{"on_hold", "Pause", "hero-pause"}, {"pending_review", "Submit for Review", "hero-paper-airplane"}]
   defp contractor_status_actions("on_hold"), do: [{"in_progress", "Resume", "hero-play"}]
+  defp contractor_status_actions("pending_review"), do: [{"completed", "Approve", "hero-check"}, {"in_progress", "Send Back", "hero-arrow-uturn-left"}]
   defp contractor_status_actions(_), do: []
 
   defp maps_url(ticket) do
@@ -690,6 +691,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   defp status_label("assigned"), do: "Assigned"
   defp status_label("in_progress"), do: "In Progress"
   defp status_label("on_hold"), do: "On Hold"
+  defp status_label("pending_review"), do: "Pending Review"
   defp status_label("completed"), do: "Completed"
   defp status_label("reviewed"), do: "Reviewed"
   defp status_label("closed"), do: "Closed"
@@ -698,6 +700,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   defp status_dot_color("assigned"), do: "bg-primary"
   defp status_dot_color("in_progress"), do: "bg-info"
   defp status_dot_color("on_hold"), do: "bg-warning"
+  defp status_dot_color("pending_review"), do: "bg-accent"
   defp status_dot_color("completed"), do: "bg-success"
   defp status_dot_color(_), do: "bg-gray-400"
 

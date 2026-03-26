@@ -5,7 +5,7 @@ defmodule Fixly.Tickets.Ticket do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(created triaged assigned in_progress on_hold completed reviewed closed)
+  @statuses ~w(created triaged assigned in_progress on_hold pending_review completed reviewed closed)
   @priorities ~w(emergency high medium low)
   @categories ~w(hvac plumbing electrical structural appliance furniture it other)
 

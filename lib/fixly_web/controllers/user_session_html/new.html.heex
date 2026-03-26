@@ -43,30 +43,8 @@
           Welcome Back
         </h2>
         <p class="text-[#444651] font-medium">
-          <%= if @current_scope do %>
-            Reauthenticate to continue
-          <% else %>
-            Please select your role to continue
-          <% end %>
+          {if @current_scope, do: "Reauthenticate to continue", else: "Sign in to your account"}
         </p>
-      </div>
-
-      <%!-- Role Selection --%>
-      <div :if={!@current_scope} class="grid grid-cols-2 gap-4 mb-8">
-        <label class="cursor-pointer">
-          <input type="radio" name="role" value="admin" checked class="peer sr-only" />
-          <div class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-transparent bg-[#e4e9ed] text-[#444651] peer-checked:border-[#00236f] peer-checked:bg-[#f0f4f8] peer-checked:text-[#00236f] hover:bg-[#dfe3e7] transition-all duration-200">
-            <.icon name="hero-building-office" class="size-6 mb-2" />
-            <span class="font-medium text-sm">Admin</span>
-          </div>
-        </label>
-        <label class="cursor-pointer">
-          <input type="radio" name="role" value="contractor" class="peer sr-only" />
-          <div class="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-transparent bg-[#e4e9ed] text-[#444651] peer-checked:border-[#00236f] peer-checked:bg-[#f0f4f8] peer-checked:text-[#00236f] hover:bg-[#dfe3e7] transition-all duration-200">
-            <.icon name="hero-wrench" class="size-6 mb-2" />
-            <span class="font-medium text-sm">Contractor</span>
-          </div>
-        </label>
       </div>
 
       <.form
