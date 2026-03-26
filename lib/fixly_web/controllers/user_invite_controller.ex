@@ -23,6 +23,8 @@ defmodule FixlyWeb.UserInviteController do
   end
 
   def accept(conn, %{"token" => token} = params) do
+    require Logger
+    Logger.error("INVITE ACCEPT called - token: #{token}, params keys: #{inspect(Map.keys(params))}")
     password_params = params["user"] || %{}
 
     case Accounts.accept_invite(token, password_params) do
