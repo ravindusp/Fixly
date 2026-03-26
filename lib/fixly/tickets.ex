@@ -225,6 +225,23 @@ defmodule Fixly.Tickets do
     |> Repo.aggregate(:count, :id)
   end
 
+  @doc "Paginated completed tickets for a technician."
+  def list_user_completed_tickets_paginated(user_id, cursor \\ nil) do
+    Ticket
+    |> where([t], t.assigned_to_user_id == ^user_id)
+    |> where([t], t.status in ["completed", "reviewed", "closed"])
+    |> preload([:location, :attachments])
+    |> Fixly.Pagination.paginate_desc(cursor: cursor)
+  end
+
+  @doc "Count completed tickets for a technician."
+  def count_user_completed_tickets(user_id) do
+    Ticket
+    |> where([t], t.assigned_to_user_id == ^user_id)
+    |> where([t], t.status in ["completed", "reviewed", "closed"])
+    |> Repo.aggregate(:count, :id)
+  end
+
   @doc "Paginated resident tickets (by submitter)."
   def list_resident_tickets_paginated(user_id, user_email, cursor \\ nil) do
     Ticket
