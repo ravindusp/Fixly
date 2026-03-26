@@ -648,7 +648,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </.info_row>
 
           <.info_row :if={@ticket.location} label="Location">
-            <div class="flex items-center gap-1.5 text-sm text-base-content">
+            <div class="flex items-center justify-end gap-1.5 text-sm text-base-content">
               <.icon name="hero-map-pin" class="size-3.5 text-base-content/40" />
               <span>{location_breadcrumb(@ticket.location)}</span>
             </div>
@@ -663,8 +663,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </.info_row>
 
           <.info_row :if={@ticket.submitter_name} label="Reported by">
-            <div class="flex items-center gap-2">
-              <div class="w-6 h-6 rounded-full bg-base-200 flex items-center justify-center">
+            <div class="flex items-center justify-end gap-2">
+              <div class="w-6 h-6 rounded-full bg-base-200 flex items-center justify-center shrink-0">
                 <span class="text-[10px] font-semibold text-base-content/60">
                   {String.first(@ticket.submitter_name) |> String.upcase()}
                 </span>
@@ -674,8 +674,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </.info_row>
 
           <.info_row :if={@ticket.assigned_to_user} label="Assigned to">
-            <div class="flex items-center gap-2">
-              <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+            <div class="flex items-center justify-end gap-2">
+              <div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                 <span class="text-[10px] font-semibold text-primary">
                   {String.first(@ticket.assigned_to_user.name || @ticket.assigned_to_user.email) |> String.upcase()}
                 </span>
