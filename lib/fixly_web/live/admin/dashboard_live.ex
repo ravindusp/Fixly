@@ -105,25 +105,33 @@ defmodule FixlyWeb.Admin.DashboardLive do
               <h2 class="text-sm font-semibold text-base-content">Ticket Volume (30 Days)</h2>
             </div>
             <div class="p-5">
-              <div id="volume-chart" phx-hook="VolumeChart" class="h-64 flex items-center justify-center">
+              <div class="h-64 flex items-center justify-center">
                 <%= if @volume == [] do %>
                   <div class="text-center">
                     <.icon name="hero-chart-bar" class="size-10 text-base-content/20 mx-auto mb-2" />
                     <p class="text-sm text-base-content/40">No ticket data yet</p>
                   </div>
                 <% else %>
-                  <!-- Mini bar chart using Tailwind (fallback before JS hook) -->
-                  <div class="w-full flex items-end gap-1 h-48">
-                    <%= for entry <- Enum.take(@volume, -30) do %>
-                      <% max_count = @volume |> Enum.map(& &1.count) |> Enum.max(fn -> 1 end) %>
-                      <% height_pct = if max_count > 0, do: entry.count / max_count * 100, else: 0 %>
-                      <div
-                        class="flex-1 bg-primary/70 rounded-t hover:bg-primary transition-colors min-w-[4px]"
-                        style={"height: #{max(height_pct, 2)}%"}
-                        title={"#{entry.count} tickets"}
-                      >
-                      </div>
-                    <% end %>
+                  <% entries = Enum.take(@volume, -30) %>
+                  <% max_count = entries |> Enum.map(& &1.count) |> Enum.max(fn -> 1 end) %>
+                  <div class="w-full h-48 flex flex-col">
+                    <div class="flex-1 flex items-end gap-0.5">
+                      <%= for entry <- entries do %>
+                        <% height_pct = if max_count > 0, do: entry.count / max_count * 100.0, else: 0 %>
+                        <div
+                          class="flex-1 bg-primary/60 rounded-t hover:bg-primary transition-colors min-w-[3px] group relative"
+                          style={"height: #{max(height_pct, 3)}%"}
+                        >
+                          <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-base-content text-base-100 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
+                            {entry.count}
+                          </div>
+                        </div>
+                      <% end %>
+                    </div>
+                    <div class="flex justify-between mt-2 text-[10px] text-base-content/30">
+                      <span>{Calendar.strftime(List.first(entries).date, "%b %d")}</span>
+                      <span>{Calendar.strftime(List.last(entries).date, "%b %d")}</span>
+                    </div>
                   </div>
                 <% end %>
               </div>
@@ -141,19 +149,19 @@ defmodule FixlyWeb.Admin.DashboardLive do
                   <p class="text-sm text-base-content/40">No categorized tickets yet</p>
                 </div>
               <% else %>
+                <% total_cat = @stats.by_category |> Map.values() |> Enum.sum() |> max(1) %>
                 <div class="space-y-3">
                   <%= for {category, count} <- Enum.sort_by(@stats.by_category, fn {_k, v} -> -v end) do %>
-                    <% max_cat = @stats.by_category |> Map.values() |> Enum.max(fn -> 1 end) %>
-                    <% pct = if max_cat > 0, do: count / max_cat * 100, else: 0 %>
+                    <% pct = Float.round(count / total_cat * 100.0, 1) %>
                     <div>
                       <div class="flex items-center justify-between mb-1">
                         <span class="text-sm font-medium text-base-content capitalize">{category}</span>
-                        <span class="text-xs text-base-content/50">{count}</span>
+                        <span class="text-xs text-base-content/50">{count} <span class="text-base-content/30">({pct}%)</span></span>
                       </div>
                       <div class="h-2 bg-base-200 rounded-full overflow-hidden">
                         <div
                           class={"h-full rounded-full #{category_bar_color(category)}"}
-                          style={"width: #{pct}%"}
+                          style={"width: #{max(pct, 1)}%"}
                         >
                         </div>
                       </div>
