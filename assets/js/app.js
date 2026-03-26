@@ -29,6 +29,7 @@ import { SLATimer } from "./hooks/sla_timer"
 import { KanbanDrop } from "./hooks/kanban_drop"
 import { InfiniteScroll } from "./hooks/infinite_scroll"
 import { LogoCropper } from "./hooks/logo_cropper"
+import { TimezoneClock } from "./hooks/timezone_clock"
 
 const Hooks = {
   ...colocatedHooks,
@@ -36,6 +37,7 @@ const Hooks = {
   KanbanDrop,
   InfiniteScroll,
   LogoCropper,
+  TimezoneClock,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

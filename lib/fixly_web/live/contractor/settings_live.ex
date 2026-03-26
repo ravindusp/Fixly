@@ -15,7 +15,6 @@ defmodule FixlyWeb.Contractor.SettingsLive do
       |> assign(:org, org)
       |> assign(:timezones, Timezones.all())
       |> assign(:form, to_form(org_to_form(org)))
-      |> allow_upload(:logo, accept: ~w(.jpg .jpeg .png .webp), max_entries: 1, max_file_size: 5_000_000)
 
     {:ok, socket}
   end
@@ -40,14 +39,13 @@ defmodule FixlyWeb.Contractor.SettingsLive do
           </div>
           <div class="p-5 space-y-5">
             <div class="flex flex-col sm:flex-row items-start gap-5">
-              <FixlyWeb.Admin.SettingsLive.logo_uploader org={@org} uploads={@uploads} />
+              <FixlyWeb.Admin.SettingsLive.logo_uploader org={@org} />
 
               <div class="flex-1 min-w-0 space-y-4 w-full">
                 <div>
                   <label class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-1.5 block">Company Name</label>
                   <input type="text" name="name" value={@form[:name].value} required class="input input-bordered input-sm w-full" />
                 </div>
-
                 <div>
                   <label class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-1.5 block">Your Code</label>
                   <div class="flex items-center gap-2.5 h-8">
@@ -111,7 +109,6 @@ defmodule FixlyWeb.Contractor.SettingsLive do
             </h3>
           </div>
           <div class="p-5 space-y-4">
-            <FixlyWeb.Admin.SettingsLive.timezone_map selected={@form[:timezone].value || "Asia/Colombo"} timezones={@timezones} />
             <div>
               <label class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-1.5 block">Select Timezone</label>
               <select name="timezone" class="select select-bordered select-sm w-full" phx-change="update_timezone">
@@ -120,6 +117,7 @@ defmodule FixlyWeb.Contractor.SettingsLive do
                 </option>
               </select>
             </div>
+            <FixlyWeb.Admin.SettingsLive.timezone_clock timezone={@form[:timezone].value || "Asia/Colombo"} />
           </div>
         </div>
 
@@ -137,39 +135,43 @@ defmodule FixlyWeb.Contractor.SettingsLive do
   @impl true
   def handle_event("validate", _params, socket), do: {:noreply, socket}
 
-  def handle_event("select_timezone", %{"tz" => tz_id}, socket) do
-    form_data = Map.put(socket.assigns.form.source, "timezone", tz_id)
-    {:noreply, assign(socket, :form, to_form(form_data))}
-  end
-
   def handle_event("update_timezone", %{"timezone" => tz_id}, socket) do
     form_data = Map.put(socket.assigns.form.source, "timezone", tz_id)
-    {:noreply, assign(socket, :form, to_form(form_data))}
+
+    {:noreply,
+     socket
+     |> assign(:form, to_form(form_data))
+     |> push_event("update_clock_timezone", %{timezone: tz_id})}
   end
 
-  def handle_event("cancel_logo", %{"ref" => ref}, socket) do
-    {:noreply, cancel_upload(socket, :logo, ref)}
+  def handle_event("save_cropped_logo", %{"data" => data_url}, socket) do
+    case FixlyWeb.Admin.SettingsLive.decode_data_url(data_url) do
+      {:ok, binary} ->
+        upload_dir = Path.join(["priv", "static", "uploads", "logos"])
+        File.mkdir_p!(upload_dir)
+        filename = "#{Ecto.UUID.generate()}.png"
+        dest = Path.join(upload_dir, filename)
+        File.write!(dest, binary)
+        logo_url = "/uploads/logos/#{filename}"
+
+        case Organizations.update_profile(socket.assigns.org, %{logo_url: logo_url}) do
+          {:ok, updated_org} ->
+            {:noreply,
+             socket
+             |> assign(:org, updated_org)
+             |> put_flash(:info, "Logo updated")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to save logo")}
+        end
+
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid image data")}
+    end
   end
 
   def handle_event("save", params, socket) do
     org = socket.assigns.org
-
-    logo_url =
-      case uploaded_entries(socket, :logo) do
-        {[_ | _], _} ->
-          upload_dir = Path.join(["priv", "static", "uploads", "logos"])
-          File.mkdir_p!(upload_dir)
-
-          consume_uploaded_entries(socket, :logo, fn %{path: path}, entry ->
-            dest = Path.join(upload_dir, "#{Ecto.UUID.generate()}_#{entry.client_name}")
-            File.cp!(path, dest)
-            {:ok, "/uploads/logos/#{Path.basename(dest)}"}
-          end)
-          |> List.first()
-
-        _ ->
-          org.logo_url
-      end
 
     attrs = %{
       name: params["name"],
@@ -177,8 +179,7 @@ defmodule FixlyWeb.Contractor.SettingsLive do
       phone: params["phone"],
       address: params["address"],
       about: params["about"],
-      timezone: params["timezone"],
-      logo_url: logo_url
+      timezone: params["timezone"]
     }
 
     case Organizations.update_profile(org, attrs) do
