@@ -68,16 +68,30 @@ defmodule Fixly.Locations do
     |> Repo.all()
   end
 
-  @doc "Create a location under a parent (or as root if parent is nil)."
+  @doc "Create a location under a parent (or as root if parent is nil).
+  Child locations inherit the parent's GPS coordinates by default."
   def create_location(attrs) do
     parent_id = Map.get(attrs, :parent_id) || Map.get(attrs, "parent_id")
 
-    depth =
+    {depth, attrs} =
       if parent_id do
         parent = get_location!(parent_id)
-        parent.depth + 1
+
+        # Inherit parent's GPS metadata if child doesn't have its own
+        child_metadata = Map.get(attrs, :metadata) || Map.get(attrs, "metadata") || %{}
+
+        inherited_metadata =
+          if child_metadata["gps_lat"] do
+            child_metadata
+          else
+            parent_gps = Map.take(parent.metadata || %{}, ["gps_lat", "gps_lng"])
+            Map.merge(parent_gps, child_metadata)
+          end
+
+        attrs = Map.put(attrs, :metadata, inherited_metadata)
+        {parent.depth + 1, attrs}
       else
-        0
+        {0, attrs}
       end
 
     result =
