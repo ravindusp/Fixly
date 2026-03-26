@@ -113,7 +113,8 @@ defmodule FixlyWeb.Contractor.TicketListLive do
                   <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
                 </div>
                 <div class="min-w-0">
-                  <p :if={ticket.location} class="text-sm text-base-content/70 truncate">{ticket.location.name}</p>
+                  <p :if={ticket.location && ticket.location.root_location} class="text-sm text-base-content/70 truncate">{ticket.location.root_location.name}</p>
+                  <p :if={ticket.location && ticket.location.depth > 0} class="text-[10px] text-base-content/40 truncate">{ticket.location.name}</p>
                   <p :if={!ticket.location} class="text-sm text-base-content/30">—</p>
                 </div>
                 <div><.priority_badge priority={ticket.priority} /></div>
@@ -210,7 +211,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
           <.info_row :if={@ticket.location} label="Location">
             <div class="flex items-center gap-1.5 text-sm text-base-content">
               <.icon name="hero-map-pin" class="size-3.5 text-base-content/40" />
-              <span>{@ticket.location.name}</span>
+              <span>{@ticket.location.root_location && @ticket.location.root_location.name}<span :if={@ticket.location.depth > 0} class="text-base-content/40"> &gt; {@ticket.location.name}</span></span>
             </div>
           </.info_row>
 
@@ -412,7 +413,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
       <p class="text-sm font-medium text-base-content leading-snug mb-2">{truncate(@ticket.description, 80)}</p>
       <div :if={@ticket.location} class="flex items-center gap-1 text-xs text-base-content/50 mb-3">
         <.icon name="hero-map-pin" class="size-3" />
-        <span class="truncate">{@ticket.location.name}</span>
+        <span class="truncate">{@ticket.location.root_location && @ticket.location.root_location.name}<span :if={@ticket.location.depth > 0} class="text-base-content/30"> &gt; {@ticket.location.name}</span></span>
       </div>
       <div class="flex items-center justify-between">
         <div :if={@ticket.assigned_to_user} class="flex items-center gap-1.5">

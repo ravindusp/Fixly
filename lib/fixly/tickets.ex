@@ -130,7 +130,7 @@ defmodule Fixly.Tickets do
     |> where([t], t.assigned_to_org_id == ^contractor_org_id)
     |> apply_filters(opts)
     |> order_by([t], [desc: t.inserted_at])
-    |> preload([:location, :assigned_to_user])
+    |> preload([[location: :root_location], :assigned_to_user])
     |> Repo.all()
   end
 
@@ -138,7 +138,7 @@ defmodule Fixly.Tickets do
   def list_contractor_tickets_paginated(contractor_org_id, cursor \\ nil) do
     Ticket
     |> where([t], t.assigned_to_org_id == ^contractor_org_id)
-    |> preload([:location, :assigned_to_user])
+    |> preload([[location: :root_location], :assigned_to_user])
     |> Fixly.Pagination.paginate_desc(cursor: cursor)
   end
 
@@ -153,7 +153,7 @@ defmodule Fixly.Tickets do
         |> where([t], t.assigned_to_org_id == ^contractor_org_id and t.status == ^status)
         |> order_by([t], desc: t.inserted_at)
         |> limit(^per_status_limit)
-        |> preload([:location, :assigned_to_user])
+        |> preload([[location: :root_location], :assigned_to_user])
         |> Repo.all()
 
       total = Map.get(total_counts, status, 0)
@@ -650,12 +650,34 @@ defmodule Fixly.Tickets do
   defp maybe_filter_location(query, nil), do: query
   defp maybe_filter_location(query, "all"), do: query
   defp maybe_filter_location(query, %MapSet{} = ids) do
-    if MapSet.size(ids) == 0, do: query, else: where(query, [t], t.location_id in ^MapSet.to_list(ids))
+    if MapSet.size(ids) == 0, do: query, else: filter_location_with_descendants(query, MapSet.to_list(ids))
   end
   defp maybe_filter_location(query, ids) when is_list(ids) do
-    if ids == [], do: query, else: where(query, [t], t.location_id in ^ids)
+    if ids == [], do: query, else: filter_location_with_descendants(query, ids)
   end
-  defp maybe_filter_location(query, location_id), do: where(query, [t], t.location_id == ^location_id)
+  defp maybe_filter_location(query, location_id), do: filter_location_with_descendants(query, [location_id])
+
+  defp filter_location_with_descendants(query, location_ids) do
+    # Get paths for selected locations, then match any ticket whose location
+    # is either one of the selected locations or a descendant (via ltree <@)
+    parent_paths =
+      Fixly.Locations.Location
+      |> where([l], l.id in ^location_ids)
+      |> select([l], l.path)
+      |> Fixly.Repo.all()
+
+    query
+    |> join(:inner, [t], l in Fixly.Locations.Location, on: t.location_id == l.id, as: :filter_loc)
+    |> where(
+      [t, filter_loc: l],
+      l.id in ^location_ids or
+        fragment(
+          "EXISTS (SELECT 1 FROM unnest(?::text[]) AS p WHERE CAST(? AS ltree) <@ CAST(p AS ltree))",
+          ^parent_paths,
+          l.path
+        )
+    )
+  end
 
   defp maybe_filter_category(query, nil), do: query
   defp maybe_filter_category(query, "all"), do: query
