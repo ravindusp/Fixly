@@ -230,7 +230,8 @@ defmodule FixlyWeb.Admin.ContractorsLive do
   end
 
   defp reload_data(socket) do
-    partnerships = Organizations.list_partnerships(socket.assigns.org_id)
+    org_id = socket.assigns.org_id
+    partnerships = if org_id, do: Organizations.list_partnerships(org_id), else: []
     assign(socket, :partnerships, partnerships)
   end
 end

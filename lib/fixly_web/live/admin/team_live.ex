@@ -194,8 +194,8 @@ defmodule FixlyWeb.Admin.TeamLive do
   defp reload_data(socket) do
     org_id = socket.assigns.org_id
 
-    members = Accounts.list_all_users_by_organization(org_id)
-    pending = Accounts.list_pending_invites(org_id)
+    members = if org_id, do: Accounts.list_all_users_by_organization(org_id), else: []
+    pending = if org_id, do: Accounts.list_pending_invites(org_id), else: []
 
     socket
     |> assign(:members, members)
