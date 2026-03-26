@@ -216,7 +216,7 @@ defmodule FixlyWeb.Admin.AssetDetailLive do
               <span>{@asset.location.name}</span>
             </div>
             <a
-              href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@asset.location.name)}"}
+              href={maps_url_for_location(@asset.location)}
               target="_blank"
               class="btn btn-sm btn-outline w-full gap-2"
             >
@@ -375,4 +375,16 @@ defmodule FixlyWeb.Admin.AssetDetailLive do
   defp event_author(%{user: %{name: name}}) when is_binary(name) and name != "", do: name
   defp event_author(%{user: %{email: email}}) when is_binary(email), do: email
   defp event_author(_), do: "System"
+
+  defp maps_url_for_location(location) do
+    cond do
+      location.metadata["gps_lat"] && location.metadata["gps_lng"] ->
+        lat = location.metadata["gps_lat"]
+        lng = location.metadata["gps_lng"]
+        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+
+      true ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(location.name)}"
+    end
+  end
 end

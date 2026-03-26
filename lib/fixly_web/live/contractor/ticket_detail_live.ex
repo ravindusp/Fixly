@@ -88,7 +88,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
           <!-- Navigate -->
           <div :if={@ticket.location} class="bg-base-100 rounded-xl border border-base-300 shadow-sm p-5">
             <a
-              href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@ticket.location.name)}"}
+              href={maps_url(@ticket)}
               target="_blank"
               class="btn btn-outline btn-primary w-full gap-2"
             >
@@ -315,4 +315,19 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
   defp comment_author(%{user: %{name: name}}) when is_binary(name) and name != "", do: name
   defp comment_author(%{user: %{email: email}}) when is_binary(email), do: email
   defp comment_author(_), do: "System"
+
+  defp maps_url(ticket) do
+    cond do
+      ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
+        lat = ticket.location.metadata["gps_lat"]
+        lng = ticket.location.metadata["gps_lng"]
+        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+
+      ticket.location ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"
+
+      true ->
+        "#"
+    end
+  end
 end

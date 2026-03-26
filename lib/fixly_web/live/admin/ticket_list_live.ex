@@ -809,7 +809,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
           </button>
           <a
             :if={@ticket.location}
-            href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@ticket.location.name)}"}
+            href={maps_url(@ticket)}
             target="_blank"
             class="btn btn-sm btn-outline flex-1 gap-2"
           >
@@ -2242,4 +2242,22 @@ defmodule FixlyWeb.Admin.TicketListLive do
   defp category_dot_color_filter("furniture"), do: "bg-emerald-500"
   defp category_dot_color_filter("it"), do: "bg-cyan-500"
   defp category_dot_color_filter(_), do: "bg-gray-400"
+
+  defp maps_url(ticket) do
+    cond do
+      ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
+        lat = ticket.location.metadata["gps_lat"]
+        lng = ticket.location.metadata["gps_lng"]
+        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+
+      ticket.location ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"
+
+      ticket.custom_location_name ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.custom_location_name)}"
+
+      true ->
+        "#"
+    end
+  end
 end

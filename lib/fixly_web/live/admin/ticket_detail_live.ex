@@ -826,22 +826,21 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   end
 
   defp maps_url(ticket) do
-    location_name =
-      cond do
-        ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
-          "#{ticket.location.metadata["gps_lat"]},#{ticket.location.metadata["gps_lng"]}"
+    cond do
+      ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
+        lat = ticket.location.metadata["gps_lat"]
+        lng = ticket.location.metadata["gps_lng"]
+        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
 
-        ticket.location ->
-          ticket.location.name
+      ticket.location ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"
 
-        ticket.custom_location_name ->
-          ticket.custom_location_name
+      ticket.custom_location_name ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.custom_location_name)}"
 
-        true ->
-          ""
-      end
-
-    "https://www.google.com/maps/search/?api=1&query=#{URI.encode(location_name)}"
+      true ->
+        "#"
+    end
   end
 
   defp submitter_initial(ticket) do

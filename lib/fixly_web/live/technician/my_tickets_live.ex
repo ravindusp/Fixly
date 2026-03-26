@@ -140,7 +140,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
         <!-- Location map link -->
         <div :if={@ticket.location} class="px-4 pb-3">
           <a
-            href={"https://www.google.com/maps/search/?api=1&query=#{URI.encode(@ticket.location.name)}"}
+            href={maps_url(@ticket)}
             target="_blank"
             class="btn btn-sm btn-outline gap-2 w-full"
           >
@@ -356,4 +356,19 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   defp truncate(nil, _), do: ""
   defp truncate(string, max) when byte_size(string) <= max, do: string
   defp truncate(string, max), do: String.slice(string, 0, max) <> "..."
+
+  defp maps_url(ticket) do
+    cond do
+      ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
+        lat = ticket.location.metadata["gps_lat"]
+        lng = ticket.location.metadata["gps_lng"]
+        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+
+      ticket.location ->
+        "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"
+
+      true ->
+        "#"
+    end
+  end
 end
