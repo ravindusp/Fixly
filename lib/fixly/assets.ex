@@ -135,6 +135,16 @@ defmodule Fixly.Assets do
     Repo.delete(asset)
   end
 
+  @doc "Deprecate an asset: rename with date suffix and set status to retired."
+  def deprecate_asset(%Asset{} = asset) do
+    date_str = Calendar.strftime(DateTime.utc_now(), "%b %d, %Y")
+    new_name = "#{asset.name} (retired #{date_str})"
+
+    asset
+    |> Asset.changeset(%{name: new_name, status: "retired"})
+    |> Repo.update()
+  end
+
   # --- Ticket-Asset Links ---
 
   @doc "Link a ticket to an asset."

@@ -16,6 +16,7 @@ defmodule Fixly.Accounts.User do
     field :name, :string
     field :phone, :string
     field :role, :string, default: "resident"
+    field :deactivated_at, :utc_datetime
 
     belongs_to :organization, Fixly.Organizations.Organization
 

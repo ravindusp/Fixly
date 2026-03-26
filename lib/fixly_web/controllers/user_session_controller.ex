@@ -106,8 +106,12 @@ defmodule FixlyWeb.UserSessionController do
     |> UserAuth.log_out_user()
   end
 
-  # Check organization status before allowing login
+  # Check user and organization status before allowing login
   defp check_org_status(%{role: "super_admin"}), do: :ok
+
+  defp check_org_status(%{deactivated_at: deactivated_at}) when not is_nil(deactivated_at) do
+    {:error, "Your account has been deactivated. Contact your organization admin for assistance."}
+  end
 
   defp check_org_status(%{organization_id: nil}), do: :ok
 

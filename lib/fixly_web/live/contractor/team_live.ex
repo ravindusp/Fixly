@@ -91,9 +91,20 @@ defmodule FixlyWeb.Contractor.TeamLive do
                     <p class="text-xs text-base-content/50">{member.email}</p>
                   </div>
                 </div>
-                <span class={["badge badge-sm", if(member.role == "contractor_admin", do: "badge-primary", else: "badge-success")]}>
-                  {if member.role == "contractor_admin", do: "Admin", else: "Technician"}
-                </span>
+                <div class="flex items-center gap-2">
+                  <span class={["badge badge-sm", if(member.role == "contractor_admin", do: "badge-primary", else: "badge-success")]}>
+                    {if member.role == "contractor_admin", do: "Admin", else: "Technician"}
+                  </span>
+                  <button
+                    :if={member.id != @current_user.id && member.role != "contractor_admin"}
+                    phx-click="deactivate_user"
+                    phx-value-id={member.id}
+                    data-confirm={"Remove #{member.name} from the team?"}
+                    class="btn btn-xs btn-ghost text-error"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
               <div :if={@members == []} class="px-5 py-8 text-center text-sm text-base-content/40">
                 No team members yet.
@@ -131,6 +142,38 @@ defmodule FixlyWeb.Contractor.TeamLive do
                   >
                     <.icon name="hero-arrow-path" class="size-3" />
                     Resend
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Past members -->
+          <div :if={@past_members != []} class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+            <div class="px-5 py-3.5 border-b border-base-300">
+              <h3 class="text-sm font-semibold text-base-content">
+                Past Members
+                <span class="badge badge-sm badge-ghost ml-1">{length(@past_members)}</span>
+              </h3>
+            </div>
+            <div class="divide-y divide-base-200">
+              <div :for={member <- @past_members} class="px-5 py-3 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-full bg-base-200 flex items-center justify-center">
+                    <span class="text-xs font-semibold text-base-content/40">
+                      {member.name |> String.first() |> String.upcase()}
+                    </span>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-base-content/50">{member.name}</p>
+                    <p class="text-xs text-base-content/40">{member.email}</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-base-content/40">
+                    Removed {Calendar.strftime(member.deactivated_at, "%b %d, %Y")}
+                  </span>
+                  <button phx-click="reactivate_user" phx-value-id={member.id} class="btn btn-xs btn-ghost text-success gap-1">
+                    <.icon name="hero-arrow-path" class="size-3" /> Reinstate
                   </button>
                 </div>
               </div>
@@ -216,6 +259,24 @@ defmodule FixlyWeb.Contractor.TeamLive do
     end
   end
 
+  def handle_event("deactivate_user", %{"id" => id}, socket) do
+    case Accounts.deactivate_user(id) do
+      {:ok, user} ->
+        {:noreply, socket |> put_flash(:info, "#{user.name} has been removed") |> reload_data()}
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove team member")}
+    end
+  end
+
+  def handle_event("reactivate_user", %{"id" => id}, socket) do
+    case Accounts.reactivate_user(id) do
+      {:ok, user} ->
+        {:noreply, socket |> put_flash(:info, "#{user.name} has been reinstated") |> reload_data()}
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to reinstate team member")}
+    end
+  end
+
   defp send_invite_email(invited_user, encoded_token, inviter, org_id) do
     org = Organizations.get_organization!(org_id)
     invite_url = url(~p"/users/invite/#{encoded_token}")
@@ -232,10 +293,12 @@ defmodule FixlyWeb.Contractor.TeamLive do
     org_id = socket.assigns.org_id
 
     members = if org_id, do: Accounts.list_all_users_by_organization(org_id), else: []
+    past_members = if org_id, do: Accounts.list_deactivated_users_by_organization(org_id), else: []
     pending = if org_id, do: Accounts.list_pending_invites(org_id), else: []
 
     socket
     |> assign(:members, members)
+    |> assign(:past_members, past_members)
     |> assign(:pending_invites, pending)
   end
 end

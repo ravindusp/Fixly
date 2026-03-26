@@ -17,20 +17,49 @@ defmodule Fixly.Accounts do
     |> Repo.all()
   end
 
-  @doc "List all users for a given organization (all roles)."
+  @doc "List active users for a given organization (all roles)."
   def list_all_users_by_organization(org_id) do
     User
     |> where([u], u.organization_id == ^org_id)
+    |> where([u], is_nil(u.deactivated_at))
     |> order_by([u], u.name)
     |> Repo.all()
   end
 
-  @doc "List only technicians for a given organization."
+  @doc "List deactivated users for a given organization."
+  def list_deactivated_users_by_organization(org_id) do
+    User
+    |> where([u], u.organization_id == ^org_id)
+    |> where([u], not is_nil(u.deactivated_at))
+    |> order_by([u], [desc: u.deactivated_at])
+    |> Repo.all()
+  end
+
+  @doc "List only active technicians for a given organization."
   def list_technicians_by_organization(org_id) do
     User
     |> where([u], u.organization_id == ^org_id and u.role == "technician")
+    |> where([u], is_nil(u.deactivated_at))
     |> order_by([u], u.name)
     |> Repo.all()
+  end
+
+  @doc "Deactivate a user (soft-delete, keeps all data)."
+  def deactivate_user(user_id) do
+    user = Repo.get!(User, user_id)
+
+    user
+    |> Ecto.Changeset.change(%{deactivated_at: DateTime.utc_now(:second)})
+    |> Repo.update()
+  end
+
+  @doc "Reactivate a deactivated user."
+  def reactivate_user(user_id) do
+    user = Repo.get!(User, user_id)
+
+    user
+    |> Ecto.Changeset.change(%{deactivated_at: nil})
+    |> Repo.update()
   end
 
   @doc "List pending invite tokens for a given organization."

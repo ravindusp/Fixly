@@ -355,21 +355,32 @@ defmodule FixlyWeb.Admin.AssetsLive do
             </div>
 
             <!-- Actions -->
-            <div class="flex gap-2">
+            <div class="space-y-2">
               <.link
-                navigate={~p"/admin/assets/#{@selected_asset.id}"}
-                class="btn btn-sm btn-primary btn-outline gap-1.5 flex-1"
+                href={~p"/admin/assets/#{@selected_asset.id}"}
+                class="btn btn-sm btn-primary btn-outline gap-1.5 w-full"
               >
                 <.icon name="hero-arrow-top-right-on-square" class="size-4" /> View Full Details
               </.link>
-              <button
-                phx-click="delete_asset"
-                phx-value-id={@selected_asset.id}
-                data-confirm={"Delete asset \"#{@selected_asset.name}\"?"}
-                class="btn btn-sm btn-ghost text-error gap-1.5 flex-1"
-              >
-                <.icon name="hero-trash" class="size-4" /> Delete
-              </button>
+              <div class="flex gap-2">
+                <button
+                  :if={@selected_asset.status != "retired"}
+                  phx-click="deprecate_asset"
+                  phx-value-id={@selected_asset.id}
+                  data-confirm={"Retire \"#{@selected_asset.name}\"? It will be renamed and marked as retired."}
+                  class="btn btn-sm btn-ghost text-warning gap-1.5 flex-1"
+                >
+                  <.icon name="hero-archive-box-arrow-down" class="size-4" /> Retire
+                </button>
+                <button
+                  phx-click="delete_asset"
+                  phx-value-id={@selected_asset.id}
+                  data-confirm={"Delete asset \"#{@selected_asset.name}\"? This cannot be undone."}
+                  class="btn btn-sm btn-ghost text-error gap-1.5 flex-1"
+                >
+                  <.icon name="hero-trash" class="size-4" /> Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -597,6 +608,18 @@ defmodule FixlyWeb.Admin.AssetsLive do
     {:ok, asset} = Assets.update_asset(socket.assigns.selected_asset, %{status: status})
     asset = Assets.get_asset!(asset.id)
     {:noreply, socket |> assign(:selected_asset, asset) |> reload_data()}
+  end
+
+  def handle_event("deprecate_asset", %{"id" => id}, socket) do
+    asset = Assets.get_asset!(id)
+
+    case Assets.deprecate_asset(asset) do
+      {:ok, _} ->
+        {:noreply, socket |> assign(:selected_asset, nil) |> reload_data() |> put_flash(:info, "Asset retired successfully")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to retire asset")}
+    end
   end
 
   def handle_event("delete_asset", %{"id" => id}, socket) do
