@@ -23,28 +23,39 @@ defmodule Fixly.Workers.SLACheckWorker do
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
     tickets = Tickets.list_tickets_needing_sla_check()
-
-    Enum.each(tickets, fn ticket ->
-      check_and_escalate(ticket)
-    end)
-
-    :ok
-  end
-
-  defp check_and_escalate(ticket) do
     now = DateTime.utc_now(:second)
-    elapsed_seconds = calculate_elapsed_seconds(ticket, now)
-    total_sla_seconds = calculate_total_sla_seconds(ticket)
 
-    if total_sla_seconds > 0 do
-      percentage = elapsed_seconds / total_sla_seconds * 100
+    # Compute SLA percentage for each ticket up front
+    tickets_with_pct =
+      tickets
+      |> Enum.map(fn ticket ->
+        elapsed = calculate_elapsed_seconds(ticket, now)
+        total = calculate_total_sla_seconds(ticket)
+        pct = if total > 0, do: elapsed / total * 100, else: 0.0
+        {ticket, pct}
+      end)
+      |> Enum.filter(fn {_ticket, pct} -> pct > 0.0 end)
 
+    ticket_ids = Enum.map(tickets_with_pct, fn {t, _} -> t.id end)
+
+    # Batch-fetch existing escalations per threshold
+    existing_by_threshold =
+      Map.new(@thresholds, fn threshold ->
+        {threshold, Tickets.existing_escalations(ticket_ids, threshold)}
+      end)
+
+    # Process each ticket, skipping already-escalated thresholds
+    Enum.each(tickets_with_pct, fn {ticket, pct} ->
       Enum.each(@thresholds, fn threshold ->
-        if percentage >= threshold and not Tickets.escalation_exists?(ticket.id, threshold) do
+        already_exists = MapSet.member?(existing_by_threshold[threshold], ticket.id)
+
+        if pct >= threshold and not already_exists do
           handle_threshold(ticket, threshold, now)
         end
       end)
-    end
+    end)
+
+    :ok
   end
 
   defp calculate_elapsed_seconds(ticket, now) do

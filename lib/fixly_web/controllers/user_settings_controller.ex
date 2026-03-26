@@ -6,6 +6,7 @@ defmodule FixlyWeb.UserSettingsController do
 
   import FixlyWeb.UserAuth, only: [require_sudo_mode: 2]
 
+  plug :put_layout, html: {FixlyWeb.Layouts, :app}
   plug :require_sudo_mode
   plug :assign_email_and_password_changesets
 

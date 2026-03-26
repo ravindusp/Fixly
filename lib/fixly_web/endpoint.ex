@@ -8,7 +8,8 @@ defmodule FixlyWeb.Endpoint do
     store: :cookie,
     key: "_fixly_key",
     signing_salt: "k0xjh/8z",
-    same_site: "Lax"
+    same_site: "Lax",
+    secure: true
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

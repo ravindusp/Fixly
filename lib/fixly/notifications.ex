@@ -31,6 +31,8 @@ defmodule Fixly.Notifications do
       ticket
       |> TicketEmail.status_change_email()
       |> Mailer.deliver()
+    else
+      {:ok, :no_submitter_email}
     end
   end
 
@@ -40,6 +42,8 @@ defmodule Fixly.Notifications do
       ticket
       |> TicketEmail.resolved_email()
       |> Mailer.deliver()
+    else
+      {:ok, :no_submitter_email}
     end
   end
 

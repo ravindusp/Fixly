@@ -12,53 +12,45 @@ defmodule Fixly.Workers.NotificationWorker do
   def perform(%Oban.Job{args: %{"type" => "new_ticket", "ticket_id" => ticket_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     Notifications.notify_new_ticket(ticket)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "assigned_to_contractor", "ticket_id" => ticket_id, "org_id" => org_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     org = Organizations.get_organization!(org_id)
     Notifications.notify_ticket_assigned_to_contractor(ticket, org)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "assigned_to_technician", "ticket_id" => ticket_id, "user_id" => user_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     user = Accounts.get_user!(user_id)
     Notifications.notify_ticket_assigned_to_technician(ticket, user)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "status_change", "ticket_id" => ticket_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     Notifications.notify_status_change(ticket)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "resolved", "ticket_id" => ticket_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     Notifications.notify_ticket_resolved(ticket)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "sla_warning", "ticket_id" => ticket_id, "user_id" => user_id, "threshold" => threshold}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     user = Accounts.get_user!(user_id)
     Notifications.notify_sla_warning(ticket, user, threshold)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "sla_breach", "ticket_id" => ticket_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     Notifications.notify_sla_breach(ticket)
-    :ok
   end
 
   def perform(%Oban.Job{args: %{"type" => "sla_critical", "ticket_id" => ticket_id, "org_id" => org_id}}) do
     ticket = Tickets.get_ticket!(ticket_id)
     org = Organizations.get_organization!(org_id)
     Notifications.notify_sla_critical(ticket, org)
-    :ok
   end
 
   # --- Convenience functions to enqueue jobs ---

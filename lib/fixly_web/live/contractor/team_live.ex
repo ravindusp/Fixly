@@ -242,7 +242,7 @@ defmodule FixlyWeb.Contractor.TeamLive do
     user = socket.assigns.current_user
     org_id = socket.assigns.org_id
 
-    case Accounts.resend_invite(user_id) do
+    case Accounts.resend_invite(user_id, org_id) do
       {:ok, {invited_user, encoded_token}} ->
         send_invite_email(invited_user, encoded_token, user, org_id)
 

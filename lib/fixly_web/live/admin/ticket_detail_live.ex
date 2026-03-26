@@ -9,7 +9,7 @@ defmodule FixlyWeb.Admin.TicketDetailLive do
   def mount(%{"id" => id}, _session, socket) do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
-    ticket = Tickets.get_ticket!(id)
+    ticket = Tickets.get_ticket_for_org!(org_id, id)
     comments = Tickets.list_comments(id)
 
     contractor_orgs =

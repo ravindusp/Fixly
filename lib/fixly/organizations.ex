@@ -116,13 +116,21 @@ defmodule Fixly.Organizations do
     end
   end
 
-  @doc "Accept a pending partnership invite."
-  def accept_partnership(partnership_id) do
+  @doc "Accept a pending partnership invite. Verifies the partnership involves the given org."
+  def accept_partnership(partnership_id, org_id) do
     case Repo.get(ContractorPartnership, partnership_id) do
-      %{status: "pending"} = partnership ->
+      %{status: "pending", owner_org_id: ^org_id} = partnership ->
         partnership
         |> ContractorPartnership.changeset(%{status: "active"})
         |> Repo.update()
+
+      %{status: "pending", contractor_org_id: ^org_id} = partnership ->
+        partnership
+        |> ContractorPartnership.changeset(%{status: "active"})
+        |> Repo.update()
+
+      %{status: "pending"} ->
+        {:error, :unauthorized}
 
       nil ->
         {:error, :not_found}
@@ -132,11 +140,17 @@ defmodule Fixly.Organizations do
     end
   end
 
-  @doc "Decline a pending partnership invite."
-  def decline_partnership(partnership_id) do
+  @doc "Decline a pending partnership invite. Verifies the partnership involves the given org."
+  def decline_partnership(partnership_id, org_id) do
     case Repo.get(ContractorPartnership, partnership_id) do
-      %{status: "pending"} = partnership ->
+      %{status: "pending", owner_org_id: ^org_id} = partnership ->
         Repo.delete(partnership)
+
+      %{status: "pending", contractor_org_id: ^org_id} = partnership ->
+        Repo.delete(partnership)
+
+      %{status: "pending"} ->
+        {:error, :unauthorized}
 
       nil ->
         {:error, :not_found}

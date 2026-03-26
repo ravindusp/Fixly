@@ -7,21 +7,21 @@ defmodule FixlyWeb.UserRegistrationControllerTest do
     test "renders registration page", %{conn: conn} do
       conn = get(conn, ~p"/users/register")
       response = html_response(conn, 200)
-      assert response =~ "Register"
-      assert response =~ ~p"/users/log-in"
+      assert response =~ "Define Your Role"
+      assert response =~ "Complete Registration"
       assert response =~ ~p"/users/register"
     end
 
     test "redirects if already logged in", %{conn: conn} do
       conn = conn |> log_in_user(user_fixture()) |> get(~p"/users/register")
 
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/admin"
     end
   end
 
   describe "POST /users/register" do
     @tag :capture_log
-    test "creates account but does not log in", %{conn: conn} do
+    test "creates account and redirects to pending page", %{conn: conn} do
       email = unique_user_email()
 
       conn =
@@ -30,10 +30,7 @@ defmodule FixlyWeb.UserRegistrationControllerTest do
         })
 
       refute get_session(conn, :user_token)
-      assert redirected_to(conn) == ~p"/users/log-in"
-
-      assert conn.assigns.flash["info"] =~
-               ~r/An email was sent to .*, please access it to confirm your account/
+      assert redirected_to(conn) == ~p"/users/pending"
     end
 
     test "render errors for invalid data", %{conn: conn} do
@@ -43,7 +40,7 @@ defmodule FixlyWeb.UserRegistrationControllerTest do
         })
 
       response = html_response(conn, 200)
-      assert response =~ "Register"
+      assert response =~ "Define Your Role"
       assert response =~ "must have the @ sign and no spaces"
     end
   end

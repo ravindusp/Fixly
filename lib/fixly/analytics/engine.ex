@@ -196,8 +196,7 @@ defmodule Fixly.Analytics.Engine do
       []
     else
       conditions = Enum.map(paths, fn path ->
-        prefix = path <> "."
-        dynamic([l], like(l.path, ^(prefix <> "%")))
+        dynamic([l], fragment("CAST(? AS ltree) <@ CAST(? AS ltree) AND ? != ?", l.path, ^path, l.path, ^path))
       end)
 
       combined = Enum.reduce(conditions, fn cond, acc ->

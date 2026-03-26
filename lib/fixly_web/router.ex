@@ -17,10 +17,22 @@ defmodule FixlyWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :require_admin_role do
+    plug :require_role, ["org_admin", "super_admin"]
+  end
+
   scope "/", FixlyWeb do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
+
+  # Health check endpoints (no auth required)
+  scope "/health", FixlyWeb do
+    pipe_through :api
+
+    get "/", HealthController, :index
+    get "/ready", HealthController, :ready
   end
 
   # Public QR ticket submission (no auth required)
@@ -68,7 +80,7 @@ defmodule FixlyWeb.Router do
 
   # Export routes (authenticated, admin-only)
   scope "/admin/export", FixlyWeb do
-    pipe_through [:browser, :require_authenticated_user]
+    pipe_through [:browser, :require_authenticated_user, :require_admin_role]
 
     get "/tickets.csv", ExportController, :tickets_csv
     get "/analytics.csv", ExportController, :analytics_csv

@@ -59,11 +59,9 @@ defmodule Fixly.Locations do
 
   @doc "Get all descendants of a location using ltree."
   def get_descendants(%Location{path: path, organization_id: org_id}) do
-    prefix = path <> "."
-
     Location
     |> where([l], l.organization_id == ^org_id)
-    |> where([l], like(l.path, ^(prefix <> "%")))
+    |> where([l], fragment("CAST(? AS ltree) <@ CAST(? AS ltree) AND ? != ?", l.path, ^path, l.path, ^path))
     |> order_by([l], [l.depth, l.position, l.name])
     |> Repo.all()
   end

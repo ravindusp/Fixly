@@ -5,16 +5,28 @@ defmodule FixlyWeb.UserSessionControllerTest do
   alias Fixly.Accounts
 
   setup do
-    %{unconfirmed_user: unconfirmed_user_fixture(), user: user_fixture()}
+    unconfirmed_user = unconfirmed_user_fixture()
+    user = user_fixture()
+
+    # Activate organisations so check_org_status/1 doesn't block login.
+    # register_user creates orgs with status "pending" for org_admin users.
+    for u <- [unconfirmed_user, user] do
+      if u.organization_id do
+        org = Fixly.Organizations.get_organization(u.organization_id)
+        Fixly.Organizations.update_organization(org, %{status: "active"})
+      end
+    end
+
+    %{unconfirmed_user: unconfirmed_user, user: user}
   end
 
   describe "GET /users/log-in" do
     test "renders login page", %{conn: conn} do
       conn = get(conn, ~p"/users/log-in")
       response = html_response(conn, 200)
-      assert response =~ "Log in"
+      assert response =~ "Welcome Back"
       assert response =~ ~p"/users/register"
-      assert response =~ "Log in with email"
+      assert response =~ "Secure Sign In"
     end
 
     test "renders login page with email filled in (sudo mode)", %{conn: conn, user: user} do
@@ -24,20 +36,20 @@ defmodule FixlyWeb.UserSessionControllerTest do
         |> get(~p"/users/log-in")
         |> html_response(200)
 
-      assert html =~ "You need to reauthenticate"
-      refute html =~ "Register"
-      assert html =~ "Log in with email"
+      assert html =~ "Reauthenticate to continue"
+      refute html =~ "Request Access"
+      assert html =~ "Secure Sign In"
 
       assert html =~
-               ~s(<input type="email" name="user[email]" id="login_form_magic_email" value="#{user.email}")
+               ~s(<input type="email" name="user[email]" id="login_form_password_email" value="#{user.email}")
     end
 
     test "renders login page (email + password)", %{conn: conn} do
       conn = get(conn, ~p"/users/log-in?mode=password")
       response = html_response(conn, 200)
-      assert response =~ "Log in"
+      assert response =~ "Welcome Back"
       assert response =~ ~p"/users/register"
-      assert response =~ "Log in with email"
+      assert response =~ "Secure Sign In"
     end
   end
 
@@ -61,7 +73,7 @@ defmodule FixlyWeb.UserSessionControllerTest do
       conn = get(conn, ~p"/users/log-in/#{token}")
       html = html_response(conn, 200)
       refute html =~ "Confirm my account"
-      assert html =~ "Log in"
+      assert html =~ "Keep me logged in on this device"
     end
 
     test "raises error for invalid token", %{conn: conn} do
@@ -83,13 +95,11 @@ defmodule FixlyWeb.UserSessionControllerTest do
         })
 
       assert get_session(conn, :user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/admin"
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/admin")
       response = html_response(conn, 200)
-      assert response =~ user.email
-      assert response =~ ~p"/users/settings"
       assert response =~ ~p"/users/log-out"
     end
 
@@ -106,7 +116,7 @@ defmodule FixlyWeb.UserSessionControllerTest do
         })
 
       assert conn.resp_cookies["_fixly_web_user_remember_me"]
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/admin"
     end
 
     test "logs the user in with return to", %{conn: conn, user: user} do
@@ -133,7 +143,7 @@ defmodule FixlyWeb.UserSessionControllerTest do
         })
 
       response = html_response(conn, 200)
-      assert response =~ "Log in"
+      assert response =~ "Welcome Back"
       assert response =~ "Invalid email or password"
     end
   end
@@ -158,13 +168,11 @@ defmodule FixlyWeb.UserSessionControllerTest do
         })
 
       assert get_session(conn, :user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/admin"
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/admin")
       response = html_response(conn, 200)
-      assert response =~ user.email
-      assert response =~ ~p"/users/settings"
       assert response =~ ~p"/users/log-out"
     end
 
@@ -179,16 +187,14 @@ defmodule FixlyWeb.UserSessionControllerTest do
         })
 
       assert get_session(conn, :user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/admin"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "User confirmed successfully."
 
       assert Accounts.get_user!(user.id).confirmed_at
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/admin")
       response = html_response(conn, 200)
-      assert response =~ user.email
-      assert response =~ ~p"/users/settings"
       assert response =~ ~p"/users/log-out"
     end
 

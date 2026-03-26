@@ -7,9 +7,9 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    ticket = Tickets.get_ticket!(id)
-    comments = Tickets.list_comments(id)
     user = socket.assigns.current_scope.user
+    ticket = Tickets.get_ticket_for_contractor_org!(user.organization_id, id)
+    comments = Tickets.list_comments(id)
     technicians = if user.organization_id, do: Accounts.list_technicians_by_organization(user.organization_id), else: []
 
     socket =

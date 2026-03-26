@@ -92,6 +92,22 @@ defmodule Fixly.Tickets do
     |> Repo.preload([:location, :attachments, :comments, :assigned_to_user, :assigned_to_org])
   end
 
+  @doc "Fetch a ticket scoped to an organization. Raises if not found or wrong org."
+  def get_ticket_for_org!(org_id, id) do
+    Ticket
+    |> where(organization_id: ^org_id, id: ^id)
+    |> Repo.one!()
+    |> Repo.preload([:location, :attachments, :comments, :assigned_to_user, :assigned_to_org])
+  end
+
+  @doc "Fetch a ticket scoped to a contractor org (by assigned_to_org_id). Raises if not found."
+  def get_ticket_for_contractor_org!(contractor_org_id, id) do
+    Ticket
+    |> where(assigned_to_org_id: ^contractor_org_id, id: ^id)
+    |> Repo.one!()
+    |> Repo.preload([:location, :attachments, :comments, :assigned_to_user, :assigned_to_org])
+  end
+
   def get_ticket(id), do: Repo.get(Ticket, id)
 
   def get_ticket_by_reference(reference_number) do
@@ -374,12 +390,23 @@ defmodule Fixly.Tickets do
 
   @active_sla_statuses ~w(assigned in_progress on_hold)
 
-  @doc "List all active tickets that need an SLA check (have a deadline, not fully escalated)."
+  @sla_check_batch_size 500
+
+  @doc """
+  List active tickets that need an SLA check.
+  Only returns tickets whose deadline is within 2x the check interval (120 minutes)
+  from now, limited to a batch size of #{@sla_check_batch_size}.
+  """
   def list_tickets_needing_sla_check do
+    horizon = DateTime.utc_now(:second) |> DateTime.add(120 * 60, :second)
+
     Ticket
     |> where([t], not is_nil(t.sla_deadline))
     |> where([t], not is_nil(t.sla_started_at))
     |> where([t], t.status in @active_sla_statuses)
+    |> where([t], t.sla_deadline <= ^horizon)
+    |> order_by([t], asc: t.sla_deadline)
+    |> limit(@sla_check_batch_size)
     |> Repo.all()
   end
 
@@ -395,6 +422,15 @@ defmodule Fixly.Tickets do
     SLAEscalation
     |> where([e], e.ticket_id == ^ticket_id and e.threshold == ^threshold)
     |> Repo.exists?()
+  end
+
+  @doc "Return the set of ticket IDs that already have an escalation at the given threshold."
+  def existing_escalations(ticket_ids, threshold) do
+    SLAEscalation
+    |> where([e], e.ticket_id in ^ticket_ids and e.threshold == ^threshold)
+    |> select([e], e.ticket_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc "Mark a ticket as SLA breached."

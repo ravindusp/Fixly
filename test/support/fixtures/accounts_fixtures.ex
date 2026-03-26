@@ -14,7 +14,10 @@ defmodule Fixly.AccountsFixtures do
 
   def valid_user_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
-      email: unique_user_email()
+      email: unique_user_email(),
+      password: valid_user_password(),
+      name: "Test User #{System.unique_integer([:positive])}",
+      role: "org_admin"
     })
   end
 
@@ -24,7 +27,13 @@ defmodule Fixly.AccountsFixtures do
       |> valid_user_attributes()
       |> Accounts.register_user()
 
-    user
+    # register_user now auto-confirms; strip it to produce a truly unconfirmed user
+    Fixly.Repo.update_all(
+      from(u in Fixly.Accounts.User, where: u.id == ^user.id),
+      set: [confirmed_at: nil, hashed_password: nil]
+    )
+
+    %{user | confirmed_at: nil, hashed_password: nil}
   end
 
   def user_fixture(attrs \\ %{}) do

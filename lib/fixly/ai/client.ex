@@ -19,9 +19,10 @@ defmodule Fixly.AI.Client do
     else
       body = build_request_body(messages, tools, opts)
 
-      url = "#{@base_url}/models/#{@model}:generateContent?key=#{api_key}"
+      url = "#{@base_url}/models/#{@model}:generateContent"
+      headers = [{"x-goog-api-key", api_key}]
 
-      case Req.post(url, json: body, receive_timeout: 30_000) do
+      case Req.post(url, json: body, headers: headers, receive_timeout: 30_000) do
         {:ok, %{status: 200, body: response_body}} ->
           parse_response(response_body)
 

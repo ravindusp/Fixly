@@ -3,6 +3,10 @@ defmodule FixlyWeb.ExportController do
 
   use FixlyWeb, :controller
 
+  import FixlyWeb.UserAuth, only: [require_role: 2]
+
+  plug :require_role, ["org_admin", "super_admin"]
+
   alias Fixly.Tickets
   alias Fixly.Analytics.Engine
 

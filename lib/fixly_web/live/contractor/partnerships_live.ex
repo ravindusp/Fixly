@@ -135,7 +135,9 @@ defmodule FixlyWeb.Contractor.PartnershipsLive do
 
   @impl true
   def handle_event("accept_invite", %{"id" => id}, socket) do
-    case Organizations.accept_partnership(id) do
+    org_id = socket.assigns.org_id
+
+    case Organizations.accept_partnership(id, org_id) do
       {:ok, _} ->
         {:noreply,
          socket
@@ -148,7 +150,9 @@ defmodule FixlyWeb.Contractor.PartnershipsLive do
   end
 
   def handle_event("decline_invite", %{"id" => id}, socket) do
-    case Organizations.decline_partnership(id) do
+    org_id = socket.assigns.org_id
+
+    case Organizations.decline_partnership(id, org_id) do
       {:ok, _} ->
         {:noreply,
          socket

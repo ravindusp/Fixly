@@ -164,7 +164,10 @@ defmodule Fixly.AI.TicketProcessor do
         try do
           Fixly.Assets.list_assets_for_location(location.id)
         rescue
-          _ -> []
+          _e in [Ecto.NoResultsError, Ecto.QueryError] -> []
+          e ->
+            Logger.warning("Unexpected error listing assets for location #{location.id}: #{inspect(e)}")
+            []
         end
       else
         []
@@ -181,12 +184,18 @@ defmodule Fixly.AI.TicketProcessor do
             try do
               Fixly.Assets.list_assets_for_location(sibling.id)
             rescue
-              _ -> []
+              _e in [Ecto.NoResultsError, Ecto.QueryError] -> []
+              e ->
+                Logger.warning("Unexpected error listing assets for sibling location #{sibling.id}: #{inspect(e)}")
+                []
             end
           end)
           |> Enum.uniq_by(& &1.name)
         rescue
-          _ -> []
+          _e in [Ecto.NoResultsError, Ecto.QueryError] -> []
+          e ->
+            Logger.warning("Unexpected error listing sibling assets: #{inspect(e)}")
+            []
         end
       else
         []
@@ -282,7 +291,9 @@ defmodule Fixly.AI.TicketProcessor do
         status: status
       })
     rescue
-      e -> Logger.error("Failed to create AI suggestion: #{inspect(e)}")
+      e ->
+        Logger.error("Failed to create AI suggestion: #{inspect(e)}")
+        {:error, e}
     end
   end
 end

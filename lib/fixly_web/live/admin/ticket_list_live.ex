@@ -80,6 +80,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       |> assign(:ai_suggestions, [])
       |> assign(:ai_loading, false)
       |> assign(:location_assets, [])
+      |> assign(:linked_asset_ids, MapSet.new())
       |> assign(:org_id, org_id)
       |> assign(:internal_users, internal_users)
       |> assign(:contractor_orgs, contractor_orgs)
@@ -89,10 +90,17 @@ defmodule FixlyWeb.Admin.TicketListLive do
     {:ok, socket}
   end
 
-  defp flatten_location_tree(nodes, acc \\ []) do
-    Enum.reduce(nodes, acc, fn node, acc ->
-      acc ++ [node] ++ flatten_location_tree(node.children)
-    end)
+  defp flatten_location_tree(nodes) do
+    nodes
+    |> do_flatten_location_tree([])
+    |> Enum.reverse()
+  end
+
+  defp do_flatten_location_tree([], acc), do: acc
+  defp do_flatten_location_tree([node | rest], acc) do
+    acc = [node | acc]
+    acc = do_flatten_location_tree(node.children, acc)
+    do_flatten_location_tree(rest, acc)
   end
 
   # --- PubSub Handlers (real-time updates from other users/workers) ---
@@ -131,7 +139,8 @@ defmodule FixlyWeb.Admin.TicketListLive do
     socket =
       if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket.id do
         comments = Tickets.list_comments(ticket.id)
-        assign(socket, selected_ticket: ticket, comments: comments)
+        linked_asset_ids = Assets.list_links_for_ticket(ticket.id) |> MapSet.new(& &1.asset_id)
+        assign(socket, selected_ticket: ticket, comments: comments, linked_asset_ids: linked_asset_ids)
       else
         socket
       end
@@ -605,6 +614,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
         ai_suggestions={@ai_suggestions}
         ai_loading={@ai_loading}
         location_assets={@location_assets}
+        linked_asset_ids={@linked_asset_ids}
       />
     </div>
     """
@@ -747,7 +757,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
                 <option
                   :for={asset <- @location_assets}
                   value={asset.id}
-                  selected={Enum.any?(Fixly.Assets.list_links_for_ticket(@ticket.id), fn l -> l.asset_id == asset.id end)}
+                  selected={MapSet.member?(@linked_asset_ids, asset.id)}
                 >
                   {asset.name}
                 </option>
@@ -1220,7 +1230,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
   def handle_event("select_ticket", %{"id" => id}, socket) do
     # If clicking the same ticket, close the panel
     if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == id do
-      {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [])}
+      {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [], linked_asset_ids: MapSet.new())}
     else
       ticket = Tickets.get_ticket!(id)
       require Logger
@@ -1228,12 +1238,13 @@ defmodule FixlyWeb.Admin.TicketListLive do
       comments = Tickets.list_comments(id)
       ai_suggestions = AI.list_suggestions_for_ticket(id)
       location_assets = if ticket.location_id, do: Assets.list_assets_for_location(ticket.location_id), else: []
-      {:noreply, assign(socket, selected_ticket: ticket, comments: comments, comment_body: "", ai_suggestions: ai_suggestions, location_assets: location_assets)}
+      linked_asset_ids = Assets.list_links_for_ticket(id) |> MapSet.new(& &1.asset_id)
+      {:noreply, assign(socket, selected_ticket: ticket, comments: comments, comment_body: "", ai_suggestions: ai_suggestions, location_assets: location_assets, linked_asset_ids: linked_asset_ids)}
     end
   end
 
   def handle_event("close_panel", _, socket) do
-    {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [])}
+    {:noreply, assign(socket, selected_ticket: nil, comments: [], ai_suggestions: [], location_assets: [], linked_asset_ids: MapSet.new())}
   end
 
   # --- Load more (per-group pagination for kanban) ---
@@ -1721,8 +1732,9 @@ defmodule FixlyWeb.Admin.TicketListLive do
           asset_id: asset_id
         })
         updated = Tickets.get_ticket!(ticket.id)
+        linked_asset_ids = Assets.list_links_for_ticket(ticket.id) |> MapSet.new(& &1.asset_id)
         PubSubBroadcast.broadcast_ticket_updated(updated)
-        {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
+        {:noreply, socket |> assign(selected_ticket: updated, linked_asset_ids: linked_asset_ids) |> reload_data()}
 
       {:error, _changeset} ->
         {:noreply, put_flash(socket, :error, "Failed to link asset (may already be linked)")}
@@ -1790,11 +1802,12 @@ defmodule FixlyWeb.Admin.TicketListLive do
         updated = Tickets.get_ticket!(ticket.id)
         suggestions = AI.list_suggestions_for_ticket(ticket.id)
         location_assets = if updated.location_id, do: Assets.list_assets_for_location(updated.location_id), else: []
+        linked_asset_ids = Assets.list_links_for_ticket(ticket.id) |> MapSet.new(& &1.asset_id)
         PubSubBroadcast.broadcast_ticket_updated(updated)
 
         {:noreply,
          socket
-         |> assign(selected_ticket: updated, ai_suggestions: suggestions, location_assets: location_assets)
+         |> assign(selected_ticket: updated, ai_suggestions: suggestions, location_assets: location_assets, linked_asset_ids: linked_asset_ids)
          |> reload_data()
          |> put_flash(:info, "AI suggestion applied")}
 
@@ -1835,8 +1848,7 @@ defmodule FixlyWeb.Admin.TicketListLive do
       socket = assign(socket, :counts, counts)
 
       # Kanban always needs grouped data
-      grouped = Tickets.list_tickets_by_status(org_id, filters, 20)
-      socket = assign(socket, :grouped, grouped)
+      socket = assign(socket, :grouped, load_grouped_tickets(socket))
 
       case socket.assigns.view_mode do
         "kanban" ->
@@ -1884,11 +1896,14 @@ defmodule FixlyWeb.Admin.TicketListLive do
     end
   end
 
+  defp load_grouped_tickets(socket) do
+    filters = build_filters(socket.assigns)
+    Tickets.list_tickets_by_status(socket.assigns.org_id, filters, 20)
+  end
+
   defp maybe_reload_kanban(socket) do
     if socket.assigns.org_id do
-      filters = build_filters(socket.assigns)
-      grouped = Tickets.list_tickets_by_status(socket.assigns.org_id, filters, 20)
-      assign(socket, :grouped, grouped)
+      assign(socket, :grouped, load_grouped_tickets(socket))
     else
       socket
     end
