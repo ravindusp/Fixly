@@ -3,11 +3,16 @@ defmodule FixlyWeb.Contractor.TicketListLive do
 
   alias Fixly.Tickets
   alias Fixly.Accounts
+  alias Fixly.PubSubBroadcast
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
+
+    if connected?(socket) && org_id do
+      PubSubBroadcast.subscribe_contractor(org_id)
+    end
 
     technicians = if org_id, do: Accounts.list_technicians_by_organization(org_id), else: []
 
@@ -27,6 +32,20 @@ defmodule FixlyWeb.Contractor.TicketListLive do
 
     {:ok, socket}
   end
+
+  @impl true
+  def handle_info({:ticket_updated, _ticket}, socket) do
+    socket =
+      if socket.assigns.selected_ticket do
+        assign(socket, :selected_ticket, Tickets.get_ticket!(socket.assigns.selected_ticket.id))
+      else
+        socket
+      end
+
+    {:noreply, reload_data(socket)}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do

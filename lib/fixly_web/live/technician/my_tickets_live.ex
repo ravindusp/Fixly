@@ -3,10 +3,15 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
   alias Fixly.Tickets
   alias Fixly.Tickets.{Ticket, StatusMachine}
+  alias Fixly.PubSubBroadcast
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
+
+    if connected?(socket) do
+      PubSubBroadcast.subscribe_user(user.id)
+    end
 
     socket =
       socket
@@ -21,6 +26,13 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
 
     {:ok, socket}
   end
+
+  @impl true
+  def handle_info({:ticket_updated, _ticket}, socket) do
+    {:noreply, reload_data(socket)}
+  end
+
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
