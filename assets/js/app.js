@@ -31,6 +31,7 @@ import { InfiniteScroll } from "./hooks/infinite_scroll"
 import { LogoCropper } from "./hooks/logo_cropper"
 import { TimezoneClock } from "./hooks/timezone_clock"
 import { LocationPicker } from "./hooks/location_picker"
+import { LineChart } from "./hooks/line_chart"
 
 const ScrollIntoView = {
   mounted() {
@@ -49,6 +50,7 @@ const Hooks = {
   LogoCropper,
   TimezoneClock,
   LocationPicker,
+  LineChart,
   ScrollIntoView,
 }
 
