@@ -185,7 +185,7 @@ defmodule FixlyWeb.Admin.ContractorsLive do
       </div>
 
       <!-- Contractor detail panel -->
-      <div :if={@selected_partnership} class="space-y-6">
+      <div :if={@selected_partnership} id="contractor-detail" phx-hook="ScrollIntoView" class="space-y-6">
         <% org = @selected_partnership.contractor_org %>
         <% stats = @contractor_stats %>
 

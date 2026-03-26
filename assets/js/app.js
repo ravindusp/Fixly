@@ -32,6 +32,15 @@ import { LogoCropper } from "./hooks/logo_cropper"
 import { TimezoneClock } from "./hooks/timezone_clock"
 import { LocationPicker } from "./hooks/location_picker"
 
+const ScrollIntoView = {
+  mounted() {
+    this.el.scrollIntoView({ behavior: "smooth", block: "start" })
+  },
+  updated() {
+    this.el.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+}
+
 const Hooks = {
   ...colocatedHooks,
   SLATimer,
@@ -40,6 +49,7 @@ const Hooks = {
   LogoCropper,
   TimezoneClock,
   LocationPicker,
+  ScrollIntoView,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
