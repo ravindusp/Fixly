@@ -100,6 +100,9 @@ defmodule FixlyWeb.Contractor.SettingsLive do
           </div>
         </div>
 
+        <!-- Main Location -->
+        <FixlyWeb.Admin.SettingsLive.location_picker org={@org} />
+
         <!-- Timezone -->
         <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
           <div class="px-5 py-3.5 border-b border-base-300">
@@ -142,6 +145,20 @@ defmodule FixlyWeb.Contractor.SettingsLive do
      socket
      |> assign(:form, to_form(form_data))
      |> push_event("update_clock_timezone", %{timezone: tz_id})}
+  end
+
+  def handle_event("update_coordinates", %{"latitude" => lat, "longitude" => lng}, socket) do
+    case Organizations.update_profile(socket.assigns.org, %{latitude: lat, longitude: lng}) do
+      {:ok, updated_org} ->
+        {:noreply, assign(socket, :org, updated_org)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save location")}
+    end
+  end
+
+  def handle_event("location_error", %{"message" => msg}, socket) do
+    {:noreply, put_flash(socket, :error, "Location error: #{msg}")}
   end
 
   def handle_event("save_cropped_logo", %{"data" => data_url}, socket) do

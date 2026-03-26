@@ -1,0 +1,10 @@
+defmodule Fixly.Repo.Migrations.AddOrgCoordinates do
+  use Ecto.Migration
+
+  def change do
+    alter table(:organizations) do
+      add :latitude, :float
+      add :longitude, :float
+    end
+  end
+end

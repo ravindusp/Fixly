@@ -110,6 +110,9 @@ defmodule FixlyWeb.Admin.SettingsLive do
           </div>
         </div>
 
+        <!-- Main Location -->
+        <.location_picker org={@org} />
+
         <!-- Timezone -->
         <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
           <div class="px-5 py-3.5 border-b border-base-300">
@@ -198,6 +201,67 @@ defmodule FixlyWeb.Admin.SettingsLive do
     """
   end
 
+  attr :org, :map, required: true
+
+  def location_picker(assigns) do
+    ~H"""
+    <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+      <div class="px-5 py-3.5 border-b border-base-300">
+        <h3 class="text-sm font-semibold text-base-content flex items-center gap-2">
+          <.icon name="hero-map-pin" class="size-4" />
+          Main Location
+        </h3>
+      </div>
+      <div id="location-picker-wrapper" phx-hook="LocationPicker" phx-update="ignore" class="p-0">
+        <!-- Map -->
+        <div
+          data-map
+          data-lat={@org.latitude}
+          data-lng={@org.longitude}
+          class="w-full h-72 sm:h-80 md:h-96"
+          style="z-index: 0;"
+        ></div>
+
+        <!-- Address display -->
+        <div class="px-5 py-3 border-t border-base-300 bg-base-200/30">
+          <div class="flex items-start gap-2.5">
+            <.icon name="hero-map-pin" class="size-4 text-primary mt-0.5 shrink-0" />
+            <p data-location-address class="text-sm text-base-content/70 leading-relaxed">
+              <%= if @org.latitude && @org.longitude do %>
+                {@org.latitude}, {@org.longitude}
+              <% else %>
+                No location set — use the buttons below or click on the map
+              <% end %>
+            </p>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="grid grid-cols-2 border-t border-base-300">
+          <button
+            type="button"
+            data-fetch-location
+            class="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-primary hover:bg-primary/5 transition-colors border-r border-base-300"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+            </svg>
+            Fetch My Location
+          </button>
+          <button
+            type="button"
+            data-set-on-map
+            class="flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-base-content/70 hover:bg-base-200/50 transition-colors"
+          >
+            <.icon name="hero-arrows-pointing-in" class="size-4" />
+            Center on Pin
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   attr :timezone, :string, required: true
 
   def timezone_clock(assigns) do
@@ -233,6 +297,20 @@ defmodule FixlyWeb.Admin.SettingsLive do
      socket
      |> assign(:form, to_form(form_data))
      |> push_event("update_clock_timezone", %{timezone: tz_id})}
+  end
+
+  def handle_event("update_coordinates", %{"latitude" => lat, "longitude" => lng}, socket) do
+    case Organizations.update_profile(socket.assigns.org, %{latitude: lat, longitude: lng}) do
+      {:ok, updated_org} ->
+        {:noreply, assign(socket, :org, updated_org)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save location")}
+    end
+  end
+
+  def handle_event("location_error", %{"message" => msg}, socket) do
+    {:noreply, put_flash(socket, :error, "Location error: #{msg}")}
   end
 
   def handle_event("save_cropped_logo", %{"data" => data_url}, socket) do

@@ -19,6 +19,8 @@ defmodule Fixly.Organizations.Organization do
     field :about, :string
     field :logo_url, :string
     field :timezone, :string, default: "Asia/Colombo"
+    field :latitude, :float
+    field :longitude, :float
 
     belongs_to :parent_org, __MODULE__, foreign_key: :parent_org_id
     has_many :child_orgs, __MODULE__, foreign_key: :parent_org_id
@@ -38,7 +40,7 @@ defmodule Fixly.Organizations.Organization do
 
   def profile_changeset(org, attrs) do
     org
-    |> cast(attrs, [:name, :phone, :email, :address, :about, :logo_url, :timezone, :slug])
+    |> cast(attrs, [:name, :phone, :email, :address, :about, :logo_url, :timezone, :slug, :latitude, :longitude])
     |> validate_required([:name])
     |> validate_format(:email, ~r/^[^@,;\s]+@[^@,;\s]+$/, message: "must be a valid email")
     |> validate_length(:about, max: 2000)
