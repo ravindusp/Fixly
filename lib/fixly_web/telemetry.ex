@@ -6,6 +6,8 @@ defmodule FixlyWeb.Telemetry do
     Supervisor.start_link(__MODULE__, arg, name: __MODULE__)
   end
 
+  @env Mix.env()
+
   @impl true
   def init(_arg) do
     children =
@@ -14,7 +16,7 @@ defmodule FixlyWeb.Telemetry do
         # every 10_000ms. Learn more here: https://hexdocs.pm/telemetry_metrics
         {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
       ] ++
-        if Mix.env() != :test do
+        if @env != :test do
           [{Telemetry.Metrics.ConsoleReporter, metrics: metrics()}]
         else
           []
