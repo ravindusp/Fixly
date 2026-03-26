@@ -202,8 +202,8 @@ defmodule Fixly.Tickets do
       active: active,
       status_counts: status_counts,
       breached: breached,
-      sla_compliance_rate: if(total > 0, do: Float.round((total - breached) / total * 100, 1), else: 100.0),
-      avg_resolution_hours: if(avg_resolution_hours, do: Float.round(avg_resolution_hours / 1, 1), else: nil),
+      sla_compliance_rate: if(total > 0, do: Float.round((total - breached) / total * 100.0, 1), else: 100.0),
+      avg_resolution_hours: if(avg_resolution_hours, do: avg_resolution_hours |> Decimal.to_float() |> Float.round(1), else: nil),
       priority_counts: priority_counts
     }
   end
