@@ -105,36 +105,66 @@ defmodule FixlyWeb.Admin.DashboardLive do
               <h2 class="text-sm font-semibold text-base-content">Ticket Volume (30 Days)</h2>
             </div>
             <div class="p-5">
-              <div class="h-64 flex items-center justify-center">
-                <%= if @volume == [] do %>
+              <%= if @volume == [] do %>
+                <div class="h-48 flex items-center justify-center">
                   <div class="text-center">
                     <.icon name="hero-chart-bar" class="size-10 text-base-content/20 mx-auto mb-2" />
                     <p class="text-sm text-base-content/40">No ticket data yet</p>
                   </div>
-                <% else %>
-                  <% entries = Enum.take(@volume, -30) %>
-                  <% max_count = entries |> Enum.map(& &1.count) |> Enum.max(fn -> 1 end) %>
-                  <div class="w-full h-48 flex flex-col">
-                    <div class="flex-1 flex items-end gap-0.5">
-                      <%= for entry <- entries do %>
-                        <% height_pct = if max_count > 0, do: entry.count / max_count * 100.0, else: 0 %>
-                        <div
-                          class="flex-1 bg-primary/60 rounded-t hover:bg-primary transition-colors min-w-[3px] group relative"
-                          style={"height: #{max(height_pct, 3)}%"}
-                        >
-                          <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-base-content text-base-100 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap">
-                            {entry.count}
-                          </div>
-                        </div>
-                      <% end %>
-                    </div>
-                    <div class="flex justify-between mt-2 text-[10px] text-base-content/30">
-                      <span>{Calendar.strftime(List.first(entries).date, "%b %d")}</span>
-                      <span>{Calendar.strftime(List.last(entries).date, "%b %d")}</span>
-                    </div>
-                  </div>
-                <% end %>
-              </div>
+                </div>
+              <% else %>
+                <% entries = Enum.take(@volume, -30) %>
+                <% max_count = entries |> Enum.map(& &1.count) |> Enum.max(fn -> 1 end) |> max(1) %>
+                <% total_entries = length(entries) %>
+                <% chart_w = 600 %>
+                <% chart_h = 180 %>
+                <% padding = 30 %>
+                <%
+                  points =
+                    entries
+                    |> Enum.with_index()
+                    |> Enum.map(fn {entry, i} ->
+                      x = padding + i / max(total_entries - 1, 1) * (chart_w - padding * 2)
+                      y = chart_h - padding - entry.count / max_count * (chart_h - padding * 2)
+                      {Float.round(x, 1), Float.round(y, 1), entry}
+                    end)
+
+                  line_path =
+                    points
+                    |> Enum.map(fn {x, y, _} -> "#{x},#{y}" end)
+                    |> Enum.join(" L ")
+
+                  area_path =
+                    "M #{padding},#{chart_h - padding} L #{line_path} L #{chart_w - padding},#{chart_h - padding} Z"
+                %>
+                <div class="w-full">
+                  <svg viewBox={"0 0 #{chart_w} #{chart_h + 20}"} class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                    <!-- Grid lines -->
+                    <line :for={i <- 0..4} x1={padding} y1={padding + i / 4 * (chart_h - padding * 2)} x2={chart_w - padding} y2={padding + i / 4 * (chart_h - padding * 2)} stroke="oklch(var(--bc) / 0.06)" stroke-width="1" />
+
+                    <!-- Y-axis labels -->
+                    <text :for={i <- 0..4} x={padding - 5} y={padding + i / 4 * (chart_h - padding * 2) + 3} text-anchor="end" fill="oklch(var(--bc) / 0.3)" font-size="9">
+                      {round(max_count * (1 - i / 4))}
+                    </text>
+
+                    <!-- Area fill -->
+                    <path d={area_path} fill="oklch(var(--p) / 0.08)" />
+
+                    <!-- Line -->
+                    <polyline points={Enum.map(points, fn {x, y, _} -> "#{x},#{y}" end) |> Enum.join(" ")} fill="none" stroke="oklch(var(--p))" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+
+                    <!-- Data points -->
+                    <circle :for={{x, y, _entry} <- points} cx={x} cy={y} r="3" fill="oklch(var(--b1))" stroke="oklch(var(--p))" stroke-width="2" />
+
+                    <!-- X-axis labels -->
+                    <%= for {x, _y, entry} <- [List.first(points), Enum.at(points, div(total_entries, 2)), List.last(points)] |> Enum.reject(&is_nil/1) |> Enum.uniq_by(fn {_, _, e} -> e.date end) do %>
+                      <text x={x} y={chart_h + 10} text-anchor="middle" fill="oklch(var(--bc) / 0.3)" font-size="9">
+                        {Calendar.strftime(entry.date, "%b %d")}
+                      </text>
+                    <% end %>
+                  </svg>
+                </div>
+              <% end %>
             </div>
           </div>
 
