@@ -4,6 +4,8 @@ defmodule FixlyWeb.UserSessionController do
   alias Fixly.Accounts
   alias FixlyWeb.UserAuth
 
+  plug :put_layout, html: {FixlyWeb.Layouts, :auth}
+
   def new(conn, _params) do
     email = get_in(conn.assigns, [:current_scope, Access.key(:user), Access.key(:email)])
     form = Phoenix.Component.to_form(%{"email" => email}, as: "user")

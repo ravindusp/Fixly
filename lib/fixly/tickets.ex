@@ -136,6 +136,59 @@ defmodule Fixly.Tickets do
     |> Map.new()
   end
 
+  @doc "Get contractor ticket stats scoped to a specific owner org's tickets."
+  def contractor_stats_for_owner(contractor_org_id, owner_org_id) do
+    base =
+      Ticket
+      |> where([t], t.assigned_to_org_id == ^contractor_org_id)
+      |> where([t], t.organization_id == ^owner_org_id)
+
+    total = Repo.aggregate(base, :count, :id)
+
+    status_counts =
+      base
+      |> group_by([t], t.status)
+      |> select([t], {t.status, count(t.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    completed_statuses = ~w(completed reviewed closed)
+    active_statuses = ~w(assigned in_progress on_hold)
+
+    completed = Enum.reduce(completed_statuses, 0, &(Map.get(status_counts, &1, 0) + &2))
+    active = Enum.reduce(active_statuses, 0, &(Map.get(status_counts, &1, 0) + &2))
+
+    breached =
+      base
+      |> where([t], t.sla_breached == true)
+      |> Repo.aggregate(:count, :id)
+
+    avg_resolution_hours =
+      base
+      |> where([t], t.status in ^completed_statuses)
+      |> select([t], fragment("AVG(EXTRACT(EPOCH FROM (? - ?)) / 3600)", t.updated_at, t.inserted_at))
+      |> Repo.one()
+
+    priority_counts =
+      base
+      |> where([t], not is_nil(t.priority))
+      |> group_by([t], t.priority)
+      |> select([t], {t.priority, count(t.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    %{
+      total: total,
+      completed: completed,
+      active: active,
+      status_counts: status_counts,
+      breached: breached,
+      sla_compliance_rate: if(total > 0, do: Float.round((total - breached) / total * 100, 1), else: 100.0),
+      avg_resolution_hours: if(avg_resolution_hours, do: Float.round(avg_resolution_hours / 1, 1), else: nil),
+      priority_counts: priority_counts
+    }
+  end
+
   @doc "Paginated technician tickets."
   def list_user_tickets_paginated(user_id, cursor \\ nil) do
     Ticket

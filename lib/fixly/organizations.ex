@@ -181,6 +181,15 @@ defmodule Fixly.Organizations do
     end
   end
 
+  @doc "Count team members in an organization."
+  def count_team_members(org_id) do
+    from(u in Fixly.Accounts.User,
+      where: u.organization_id == ^org_id,
+      where: not is_nil(u.confirmed_at)
+    )
+    |> Repo.aggregate(:count, :id)
+  end
+
   def create_organization(attrs) do
     %Organization{}
     |> Organization.changeset(attrs)

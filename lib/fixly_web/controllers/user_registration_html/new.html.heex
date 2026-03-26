@@ -1,32 +1,206 @@
-<Layouts.app flash={@flash} current_scope={@current_scope}>
-  <div class="mx-auto max-w-sm">
-    <div class="text-center">
-      <.header>
-        Register for an account
-        <:subtitle>
-          Already registered?
-          <.link navigate={~p"/users/log-in"} class="font-semibold text-brand hover:underline">
-            Log in
-          </.link>
-          to your account now.
-        </:subtitle>
-      </.header>
+<main class="flex-grow flex items-center justify-center py-20 px-6">
+  <div class="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+    <%!-- Left Side: Editorial Context --%>
+    <div class="lg:col-span-5 space-y-8">
+      <div class="space-y-4">
+        <span class="text-[#00236f] font-bold text-2xl tracking-tighter" style="font-family: 'Manrope', sans-serif;">
+          Fixly
+        </span>
+        <h1
+          class="text-4xl lg:text-5xl font-extrabold text-[#171c1f] tracking-tight leading-tight"
+          style="font-family: 'Manrope', sans-serif;"
+        >
+          Streamline your maintenance with precision.
+        </h1>
+        <p class="text-[#444651] text-lg leading-relaxed max-w-md">
+          Join the next generation of facility management. From property teams to specialized contracting, build your operational blueprint here.
+        </p>
+      </div>
+      <div class="hidden lg:block relative group">
+        <div class="absolute -inset-4 bg-[#00236f]/5 rounded-xl blur-2xl group-hover:bg-[#00236f]/10 transition duration-1000">
+        </div>
+        <div class="relative rounded-xl overflow-hidden shadow-2xl">
+          <div class="w-full aspect-video bg-gradient-to-br from-[#00236f] to-[#1e3a8a] flex items-center justify-center">
+            <.icon name="hero-wrench-screwdriver" class="size-20 text-white/20" />
+          </div>
+        </div>
+      </div>
     </div>
 
-    <.form :let={f} for={@changeset} action={~p"/users/register"}>
-      <.input
-        field={f[:email]}
-        type="email"
-        label="Email"
-        autocomplete="username"
-        spellcheck="false"
-        required
-        phx-mounted={JS.focus()}
-      />
+    <%!-- Right Side: Registration Flow --%>
+    <div class="lg:col-span-7">
+      <div class="bg-white rounded-xl p-8 lg:p-12 shadow-sm relative overflow-hidden">
+        <%!-- Progress Bar --%>
+        <div class="absolute top-0 left-0 w-full h-1 bg-[#f0f4f8]">
+          <div class="h-full bg-[#00236f] w-1/2"></div>
+        </div>
 
-      <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">
-        Create an account
-      </.button>
-    </.form>
+        <.form
+          :let={f}
+          for={@changeset}
+          action={~p"/users/register"}
+          class="auth-form"
+        >
+          <div class="flex flex-col gap-10">
+            <%!-- Step Header --%>
+            <div class="space-y-2">
+              <h2 class="text-2xl font-bold" style="font-family: 'Manrope', sans-serif;">
+                Define Your Role
+              </h2>
+              <p class="text-[#444651] text-sm">
+                Select the account type that fits your operations.
+              </p>
+            </div>
+
+            <%!-- Role Selection (radio — per Phoenix docs, radio is best written directly) --%>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <%!-- Admin Role Card --%>
+              <label class="relative cursor-pointer group">
+                <input
+                  type="radio"
+                  name={f[:role].name}
+                  value="org_admin"
+                  checked={Phoenix.HTML.Form.normalize_value("radio", f[:role].value) == "org_admin"}
+                  class="peer sr-only"
+                />
+                <div class="h-full p-6 rounded-lg bg-[#f0f4f8] border-2 border-transparent peer-checked:border-[#00236f] peer-checked:bg-white transition-all duration-200">
+                  <div class="flex flex-col gap-4">
+                    <div class="w-12 h-12 rounded-md bg-[#00236f]/10 flex items-center justify-center text-[#00236f]">
+                      <.icon name="hero-building-office" class="size-7" />
+                    </div>
+                    <div>
+                      <h3 class="font-bold text-lg text-[#171c1f]" style="font-family: 'Manrope', sans-serif;">
+                        Admin
+                      </h3>
+                      <p class="text-xs text-[#444651] mt-1 leading-relaxed">
+                        Oversee facilities, manage teams, and assign work orders across your properties.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div class="absolute top-4 right-4 text-[#00236f] opacity-0 peer-checked:opacity-100">
+                  <.icon name="hero-check-circle-solid" class="size-6" />
+                </div>
+              </label>
+
+              <%!-- Contractor Role Card --%>
+              <label class="relative cursor-pointer group">
+                <input
+                  type="radio"
+                  name={f[:role].name}
+                  value="contractor_admin"
+                  checked={Phoenix.HTML.Form.normalize_value("radio", f[:role].value) == "contractor_admin"}
+                  class="peer sr-only"
+                />
+                <div class="h-full p-6 rounded-lg bg-[#f0f4f8] border-2 border-transparent peer-checked:border-[#00236f] peer-checked:bg-white transition-all duration-200">
+                  <div class="flex flex-col gap-4">
+                    <div class="w-12 h-12 rounded-md bg-amber-100/50 flex items-center justify-center text-amber-800">
+                      <.icon name="hero-wrench" class="size-7" />
+                    </div>
+                    <div>
+                      <h3 class="font-bold text-lg text-[#171c1f]" style="font-family: 'Manrope', sans-serif;">
+                        Contractor
+                      </h3>
+                      <p class="text-xs text-[#444651] mt-1 leading-relaxed">
+                        Manage your crew, receive work orders, and track job completion.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div class="absolute top-4 right-4 text-[#00236f] opacity-0 peer-checked:opacity-100">
+                  <.icon name="hero-check-circle-solid" class="size-6" />
+                </div>
+              </label>
+            </div>
+
+            <%!-- Role error --%>
+            <p
+              :for={{msg, _opts} <- f[:role].errors}
+              :if={Phoenix.Component.used_input?(f[:role])}
+              class="flex gap-2 items-center text-sm text-error -mt-4"
+            >
+              <.icon name="hero-exclamation-circle" class="size-5" />
+              {msg}
+            </p>
+
+            <%!-- Registration Form Fields --%>
+            <div class="space-y-8">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+                <.input
+                  field={f[:name]}
+                  type="text"
+                  label="Full Name"
+                  placeholder="Alex Chen"
+                  required
+                  class="auth-input w-full px-4 py-3 bg-[#e4e9ed] rounded-t-sm border-b-2 border-transparent text-sm text-[#171c1f]"
+                />
+                <.input
+                  field={f[:email]}
+                  type="email"
+                  label="Work Email"
+                  autocomplete="username"
+                  spellcheck="false"
+                  placeholder="alex@company.com"
+                  required
+                  class="auth-input w-full px-4 py-3 bg-[#e4e9ed] rounded-t-sm border-b-2 border-transparent text-sm text-[#171c1f]"
+                />
+              </div>
+
+              <.input
+                field={f[:password]}
+                type="password"
+                label="Password"
+                autocomplete="new-password"
+                spellcheck="false"
+                placeholder="••••••••"
+                required
+                class="auth-input w-full px-4 py-3 bg-[#e4e9ed] rounded-t-sm border-b-2 border-transparent text-sm text-[#171c1f]"
+              />
+
+              <%!-- Actions --%>
+              <div class="pt-6 flex flex-col md:flex-row items-center justify-between gap-6">
+                <.link
+                  navigate={~p"/users/log-in"}
+                  class="text-[#00236f] font-semibold text-sm hover:underline flex items-center gap-2"
+                >
+                  <.icon name="hero-arrow-left" class="size-4" />
+                  Back to Login
+                </.link>
+                <.button
+                  phx-disable-with="Creating account..."
+                  class="auth-btn text-white px-10 py-4 rounded-md font-bold text-sm tracking-wide shadow-lg transition-all flex items-center gap-3"
+                  style="font-family: 'Manrope', sans-serif;"
+                >
+                  Complete Registration
+                  <.icon name="hero-arrow-right" class="size-4" />
+                </.button>
+              </div>
+            </div>
+          </div>
+        </.form>
+
+        <%!-- Compliance Badges --%>
+        <div class="mt-12 pt-8 flex items-center justify-center gap-8 grayscale opacity-40">
+          <span class="text-xs font-bold tracking-[0.2em] text-[#444651]">SOC2 COMPLIANT</span>
+          <span class="text-xs font-bold tracking-[0.2em] text-[#444651]">ISO 27001</span>
+        </div>
+      </div>
+    </div>
   </div>
-</Layouts.app>
+</main>
+
+<%!-- Footer --%>
+<footer class="flex flex-col md:flex-row justify-between items-center px-8 py-6 w-full border-t border-slate-200 bg-slate-50">
+  <div class="flex flex-col gap-2">
+    <span class="text-lg font-bold text-[#00236f]">Fixly</span>
+    <p class="text-xs text-slate-500">
+      &copy; {DateTime.utc_now().year} Fixly. All rights reserved.
+    </p>
+  </div>
+  <div class="flex gap-6 mt-4 md:mt-0">
+    <.link class="text-slate-500 hover:text-[#00236f] transition-opacity opacity-80 hover:opacity-100 hover:underline text-xs" href="#">Privacy Policy</.link>
+    <.link class="text-slate-500 hover:text-[#00236f] transition-opacity opacity-80 hover:opacity-100 hover:underline text-xs" href="#">Terms of Service</.link>
+    <.link class="text-slate-500 hover:text-[#00236f] transition-opacity opacity-80 hover:opacity-100 hover:underline text-xs" href="#">Security</.link>
+    <.link class="text-slate-500 hover:text-[#00236f] transition-opacity opacity-80 hover:opacity-100 hover:underline text-xs" href="#">Status</.link>
+  </div>
+</footer>

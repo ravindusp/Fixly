@@ -1,7 +1,12 @@
-<Layouts.app flash={@flash} current_scope={@current_scope}>
-  <div class="mx-auto max-w-sm">
-    <div class="text-center">
-      <.header>Welcome {@user.email}</.header>
+<main class="flex-grow flex items-center justify-center px-6 py-12 md:py-24">
+  <div class="w-full max-w-md bg-white rounded-xl p-8 md:p-12 shadow-2xl">
+    <div class="text-center mb-8">
+      <div class="w-14 h-14 rounded-lg auth-gradient flex items-center justify-center mx-auto mb-4">
+        <.icon name="hero-wrench-screwdriver" class="size-7 text-white" />
+      </div>
+      <h2 class="text-2xl font-bold text-[#171c1f] mb-2" style="font-family: 'Manrope', sans-serif;">
+        Welcome {Phoenix.HTML.raw(@user.email)}
+      </h2>
     </div>
 
     <.form
@@ -9,20 +14,27 @@
       for={@form}
       id="confirmation_form"
       action={~p"/users/log-in?_action=confirmed"}
-      phx-mounted={JS.focus_first()}
+      class="space-y-4"
     >
       <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
-      <.button
+      <button
+        type="submit"
         name={@form[:remember_me].name}
         value="true"
         phx-disable-with="Confirming..."
-        class="btn btn-primary w-full"
+        class="auth-btn w-full text-white font-bold py-4 rounded-md shadow-lg shadow-[#00236f]/20 hover:shadow-xl transition-all"
+        style="font-family: 'Manrope', sans-serif;"
       >
         Confirm and stay logged in
-      </.button>
-      <.button phx-disable-with="Confirming..." class="btn btn-primary btn-soft w-full mt-2">
+      </button>
+      <button
+        type="submit"
+        phx-disable-with="Confirming..."
+        class="w-full bg-[#e4e9ed] text-[#171c1f] font-bold py-4 rounded-md hover:bg-[#dfe3e7] transition-all"
+        style="font-family: 'Manrope', sans-serif;"
+      >
         Confirm and log in only this time
-      </.button>
+      </button>
     </.form>
 
     <.form
@@ -30,30 +42,42 @@
       for={@form}
       id="login_form"
       action={~p"/users/log-in"}
-      phx-mounted={JS.focus_first()}
+      class="space-y-4"
     >
       <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
       <%= if @current_scope do %>
-        <.button variant="primary" phx-disable-with="Logging in..." class="btn btn-primary w-full">
+        <button
+          type="submit"
+          phx-disable-with="Logging in..."
+          class="auth-btn w-full text-white font-bold py-4 rounded-md shadow-lg shadow-[#00236f]/20 hover:shadow-xl transition-all"
+          style="font-family: 'Manrope', sans-serif;"
+        >
           Log in
-        </.button>
+        </button>
       <% else %>
-        <.button
+        <button
+          type="submit"
           name={@form[:remember_me].name}
           value="true"
           phx-disable-with="Logging in..."
-          class="btn btn-primary w-full"
+          class="auth-btn w-full text-white font-bold py-4 rounded-md shadow-lg shadow-[#00236f]/20 hover:shadow-xl transition-all"
+          style="font-family: 'Manrope', sans-serif;"
         >
           Keep me logged in on this device
-        </.button>
-        <.button phx-disable-with="Logging in..." class="btn btn-primary btn-soft w-full mt-2">
+        </button>
+        <button
+          type="submit"
+          phx-disable-with="Logging in..."
+          class="w-full bg-[#e4e9ed] text-[#171c1f] font-bold py-4 rounded-md hover:bg-[#dfe3e7] transition-all"
+          style="font-family: 'Manrope', sans-serif;"
+        >
           Log me in only this time
-        </.button>
+        </button>
       <% end %>
     </.form>
 
-    <p :if={!@user.confirmed_at} class="alert alert-outline mt-8">
-      Tip: If you prefer passwords, you can enable them in the user settings.
+    <p :if={!@user.confirmed_at} class="mt-8 text-center text-sm text-[#444651] bg-[#f0f4f8] p-4 rounded-lg">
+      Tip: You can set a password later in your account settings.
     </p>
   </div>
-</Layouts.app>
+</main>
