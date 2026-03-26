@@ -51,6 +51,7 @@ defmodule FixlyWeb.Router do
       live "/analytics", AnalyticsLive, :index
       live "/team", TeamLive, :index
       live "/contractors", ContractorsLive, :index
+      live "/settings", SettingsLive, :index
     end
   end
 
@@ -72,6 +73,8 @@ defmodule FixlyWeb.Router do
       live "/tickets", TicketListLive, :index
       live "/tickets/:id", TicketDetailLive, :show
       live "/team", TeamLive, :index
+      live "/partnerships", PartnershipsLive, :index
+      live "/settings", SettingsLive, :index
     end
   end
 

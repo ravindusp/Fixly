@@ -36,6 +36,7 @@
           </p>
           <.sidebar_link href={~p"/admin/contractors"} icon="hero-building-storefront" label="Contractors" />
           <.sidebar_link href={~p"/admin/team"} icon="hero-user-group" label="Team" />
+          <.sidebar_link href={~p"/admin/settings"} icon="hero-cog-6-tooth" label="Settings" />
         </div>
       <% end %>
 
@@ -44,7 +45,9 @@
           Main Menu
         </p>
         <.sidebar_link href={~p"/contractor/tickets"} icon="hero-ticket" label="Tickets" />
+        <.sidebar_link href={~p"/contractor/partnerships"} icon="hero-link" label="Partnerships" />
         <.sidebar_link href={~p"/contractor/team"} icon="hero-user-group" label="Team" />
+        <.sidebar_link href={~p"/contractor/settings"} icon="hero-cog-6-tooth" label="Settings" />
       <% end %>
 
       <%= if @current_scope && @current_scope.user.role == "technician" do %>

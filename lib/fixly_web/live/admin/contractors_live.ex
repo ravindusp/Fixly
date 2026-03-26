@@ -12,7 +12,8 @@ defmodule FixlyWeb.Admin.ContractorsLive do
       socket
       |> assign(:page_title, "Contractors")
       |> assign(:org_id, org_id)
-      |> assign(:add_form, to_form(%{"name" => ""}))
+      |> assign(:invite_code, "")
+      |> assign(:search_results, nil)
       |> reload_data()
 
     {:ok, socket}
@@ -25,46 +26,74 @@ defmodule FixlyWeb.Admin.ContractorsLive do
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-lg font-semibold text-base-content">Contractor Partnerships</h2>
-          <p class="text-sm text-base-content/50">Manage contractor companies that service your properties</p>
+          <p class="text-sm text-base-content/50">Invite and manage contractor companies</p>
         </div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Add contractor form -->
-        <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
-          <div class="px-5 py-3.5 border-b border-base-300">
-            <h3 class="text-sm font-semibold text-base-content">Add Contractor</h3>
-          </div>
-          <div class="p-5">
-            <.form for={@add_form} phx-submit="add_contractor" class="space-y-4">
-              <div>
-                <label class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-1 block">Company Name</label>
+        <!-- Invite contractor form -->
+        <div class="space-y-4">
+          <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
+            <div class="px-5 py-3.5 border-b border-base-300">
+              <h3 class="text-sm font-semibold text-base-content flex items-center gap-2">
+                <.icon name="hero-link" class="size-4" />
+                Invite Contractor
+              </h3>
+            </div>
+            <div class="p-5 space-y-4">
+              <p class="text-xs text-base-content/50">
+                Enter a contractor's display code (e.g. FX-7K4X) or search by name
+              </p>
+              <form phx-submit="invite_by_code" class="space-y-3">
                 <input
                   type="text"
-                  name="name"
-                  value={@add_form[:name].value}
-                  required
-                  placeholder="e.g. ABC Plumbing"
-                  class="input input-bordered input-sm w-full"
+                  name="code"
+                  value={@invite_code}
+                  placeholder="FX-XXXX or company name"
+                  phx-change="search_contractor"
+                  phx-debounce="300"
+                  class="input input-bordered input-sm w-full font-mono"
                 />
+                <button type="submit" class="btn btn-primary btn-sm w-full gap-1.5">
+                  <.icon name="hero-paper-airplane" class="size-4" />
+                  Send Invite
+                </button>
+              </form>
+
+              <!-- Search results -->
+              <div :if={@search_results && @search_results != []} class="space-y-2">
+                <p class="text-xs font-medium text-base-content/50">Found contractors:</p>
+                <div
+                  :for={result <- @search_results}
+                  class="flex items-center justify-between p-3 rounded-lg bg-base-200/50 border border-base-200"
+                >
+                  <div>
+                    <p class="text-sm font-medium text-base-content">{result.name}</p>
+                    <p class="text-xs text-base-content/50 font-mono">{result.display_code}</p>
+                  </div>
+                  <button
+                    phx-click="invite_org"
+                    phx-value-org-id={result.id}
+                    class="btn btn-xs btn-primary"
+                  >
+                    Invite
+                  </button>
+                </div>
               </div>
-              <button type="submit" class="btn btn-primary btn-sm w-full gap-1.5">
-                <.icon name="hero-plus" class="size-4" />
-                Add Contractor
-              </button>
-            </.form>
+              <p :if={@search_results == []} class="text-xs text-base-content/40 text-center py-2">
+                No contractors found
+              </p>
+            </div>
           </div>
         </div>
 
-        <!-- Contractor list -->
+        <!-- Partnerships list -->
         <div class="lg:col-span-2">
           <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
             <div class="px-5 py-3.5 border-b border-base-300">
               <h3 class="text-sm font-semibold text-base-content">
-                Active Partnerships
-                <span class="badge badge-sm badge-ghost ml-1">
-                  {Enum.count(@partnerships, &(&1.status == "active"))}
-                </span>
+                Partnerships
+                <span class="badge badge-sm badge-ghost ml-1">{length(@partnerships)}</span>
               </h3>
             </div>
             <div class="divide-y divide-base-200">
@@ -72,33 +101,41 @@ defmodule FixlyWeb.Admin.ContractorsLive do
                 <div class="flex items-center gap-3">
                   <div class={[
                     "w-10 h-10 rounded-lg flex items-center justify-center",
-                    partnership.status == "active" && "bg-primary/10",
-                    partnership.status != "active" && "bg-base-200"
+                    partnership.status == "active" && "bg-success/10",
+                    partnership.status == "pending" && "bg-warning/10",
+                    partnership.status not in ["active", "pending"] && "bg-base-200"
                   ]}>
                     <.icon name="hero-building-storefront" class={[
                       "size-5",
-                      partnership.status == "active" && "text-primary",
-                      partnership.status != "active" && "text-base-content/30"
+                      partnership.status == "active" && "text-success",
+                      partnership.status == "pending" && "text-warning",
+                      partnership.status not in ["active", "pending"] && "text-base-content/30"
                     ]} />
                   </div>
                   <div>
                     <p class={[
                       "text-sm font-medium",
-                      partnership.status == "active" && "text-base-content",
-                      partnership.status != "active" && "text-base-content/50 line-through"
+                      partnership.status == "inactive" && "text-base-content/50 line-through",
+                      partnership.status != "inactive" && "text-base-content"
                     ]}>
                       {partnership.contractor_org.name}
                     </p>
-                    <p class="text-xs text-base-content/50">
-                      Since {Calendar.strftime(partnership.inserted_at, "%b %d, %Y")}
-                    </p>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-base-content/40 font-mono">
+                        {partnership.contractor_org.display_code}
+                      </span>
+                      <span class="text-xs text-base-content/40">
+                        · {Calendar.strftime(partnership.inserted_at, "%b %d, %Y")}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class={[
                     "badge badge-sm",
                     partnership.status == "active" && "badge-success",
-                    partnership.status != "active" && "badge-ghost"
+                    partnership.status == "pending" && "badge-warning",
+                    partnership.status not in ["active", "pending"] && "badge-ghost"
                   ]}>
                     {partnership.status}
                   </span>
@@ -113,8 +150,12 @@ defmodule FixlyWeb.Admin.ContractorsLive do
                   </button>
                 </div>
               </div>
-              <div :if={@partnerships == []} class="px-5 py-8 text-center text-sm text-base-content/40">
-                No contractor partnerships yet. Add one to get started.
+              <div :if={@partnerships == []} class="px-5 py-12 text-center">
+                <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mx-auto mb-4">
+                  <.icon name="hero-building-storefront" class="size-6 text-base-content/30" />
+                </div>
+                <h3 class="text-base font-semibold text-base-content mb-1">No contractors yet</h3>
+                <p class="text-sm text-base-content/50">Invite a contractor by their display code to get started.</p>
               </div>
             </div>
           </div>
@@ -125,31 +166,33 @@ defmodule FixlyWeb.Admin.ContractorsLive do
   end
 
   @impl true
-  def handle_event("add_contractor", %{"name" => name}, socket) do
+  def handle_event("search_contractor", %{"code" => query}, socket) when byte_size(query) >= 2 do
+    results = Organizations.search_contractor_orgs(query)
+    # Filter out contractors already in partnerships
+    existing_ids = Enum.map(socket.assigns.partnerships, & &1.contractor_org.id)
+    filtered = Enum.reject(results, &(&1.id in existing_ids))
+
+    {:noreply, assign(socket, search_results: filtered, invite_code: query)}
+  end
+
+  def handle_event("search_contractor", %{"code" => query}, socket) do
+    {:noreply, assign(socket, search_results: nil, invite_code: query)}
+  end
+
+  def handle_event("invite_by_code", %{"code" => code}, socket) do
     org_id = socket.assigns.org_id
 
-    case Organizations.create_contractor_org_with_partnership(%{name: name}, org_id) do
-      {:ok, org} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "#{org.name} added as a contractor")
-         |> assign(:add_form, to_form(%{"name" => ""}))
-         |> reload_data()}
+    case Organizations.get_contractor_by_code(code) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "No contractor found with code #{code}")}
 
-      {:error, changeset} ->
-        error_msg =
-          case changeset do
-            %Ecto.Changeset{} ->
-              changeset.errors
-              |> Enum.map(fn {field, {msg, _}} -> "#{field} #{msg}" end)
-              |> Enum.join(", ")
-
-            _ ->
-              "Failed to add contractor"
-          end
-
-        {:noreply, put_flash(socket, :error, error_msg)}
+      contractor ->
+        send_invite(socket, org_id, contractor)
     end
+  end
+
+  def handle_event("invite_org", %{"org-id" => contractor_org_id}, socket) do
+    send_invite(socket, socket.assigns.org_id, %{id: contractor_org_id})
   end
 
   def handle_event("deactivate", %{"id" => id}, socket) do
@@ -162,6 +205,27 @@ defmodule FixlyWeb.Admin.ContractorsLive do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to deactivate partnership")}
+    end
+  end
+
+  defp send_invite(socket, owner_org_id, contractor) do
+    case Organizations.send_partnership_invite(owner_org_id, contractor.id) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Partnership invite sent!")
+         |> assign(:invite_code, "")
+         |> assign(:search_results, nil)
+         |> reload_data()}
+
+      {:error, :already_active} ->
+        {:noreply, put_flash(socket, :error, "Partnership already active")}
+
+      {:error, :already_pending} ->
+        {:noreply, put_flash(socket, :error, "Invite already pending")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to send invite")}
     end
   end
 

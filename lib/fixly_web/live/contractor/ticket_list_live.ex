@@ -9,7 +9,7 @@ defmodule FixlyWeb.Contractor.TicketListLive do
     user = socket.assigns.current_scope.user
     org_id = user.organization_id
 
-    technicians = Accounts.list_technicians_by_organization(org_id)
+    technicians = if org_id, do: Accounts.list_technicians_by_organization(org_id), else: []
 
     socket =
       socket

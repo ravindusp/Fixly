@@ -118,10 +118,33 @@ defmodule Fixly.Accounts do
 
   """
   def register_user(attrs) do
-    %User{}
-    |> User.registration_changeset(attrs)
-    |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
-    |> Repo.insert()
+    changeset =
+      %User{}
+      |> User.registration_changeset(attrs)
+      |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
+
+    role = Ecto.Changeset.get_field(changeset, :role)
+    name = Ecto.Changeset.get_field(changeset, :name)
+
+    if role in ["org_admin", "contractor_admin"] do
+      org_type = if role == "org_admin", do: "owner", else: "contractor"
+
+      Repo.transact(fn ->
+        with {:ok, org} <-
+               Fixly.Organizations.create_organization(%{
+                 name: "#{name}'s Organization",
+                 type: org_type
+               }),
+             {:ok, user} <-
+               changeset
+               |> Ecto.Changeset.put_change(:organization_id, org.id)
+               |> Repo.insert() do
+          {:ok, user}
+        end
+      end)
+    else
+      Repo.insert(changeset)
+    end
   end
 
   @doc """

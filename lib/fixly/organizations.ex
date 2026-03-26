@@ -35,6 +35,28 @@ defmodule Fixly.Organizations do
     |> Repo.all()
   end
 
+  @doc "List incoming partnership invites for a contractor org."
+  def list_incoming_invites(contractor_org_id) do
+    from(cp in ContractorPartnership,
+      where: cp.contractor_org_id == ^contractor_org_id and cp.status == "pending",
+      join: o in assoc(cp, :owner_org),
+      preload: [owner_org: o],
+      order_by: [desc: cp.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc "List active partnerships for a contractor org (owner orgs they work with)."
+  def list_contractor_partnerships(contractor_org_id) do
+    from(cp in ContractorPartnership,
+      where: cp.contractor_org_id == ^contractor_org_id,
+      join: o in assoc(cp, :owner_org),
+      preload: [owner_org: o],
+      order_by: [desc: cp.inserted_at]
+    )
+    |> Repo.all()
+  end
+
   @doc "Check if a partnership exists between an owner org and a contractor org."
   def partnership_exists?(owner_org_id, contractor_org_id) do
     from(cp in ContractorPartnership,
@@ -44,6 +66,84 @@ defmodule Fixly.Organizations do
           cp.status == "active"
     )
     |> Repo.exists?()
+  end
+
+  @doc "Search contractor orgs by name or display code."
+  def search_contractor_orgs(query_string) do
+    pattern = "%#{query_string}%"
+
+    from(o in Organization,
+      where: o.type == "contractor",
+      where: ilike(o.name, ^pattern) or o.display_code == ^String.upcase(query_string),
+      limit: 10,
+      order_by: o.name
+    )
+    |> Repo.all()
+  end
+
+  @doc "Find a contractor org by display code."
+  def get_contractor_by_code(code) do
+    Repo.get_by(Organization, display_code: String.upcase(code), type: "contractor")
+  end
+
+  @doc "Send a partnership invite (creates partnership with pending status)."
+  def send_partnership_invite(owner_org_id, contractor_org_id) do
+    # Check if partnership already exists
+    existing =
+      from(cp in ContractorPartnership,
+        where:
+          cp.owner_org_id == ^owner_org_id and
+            cp.contractor_org_id == ^contractor_org_id and
+            cp.status in ["active", "pending"]
+      )
+      |> Repo.one()
+
+    case existing do
+      nil ->
+        %ContractorPartnership{}
+        |> ContractorPartnership.changeset(%{
+          owner_org_id: owner_org_id,
+          contractor_org_id: contractor_org_id,
+          status: "pending"
+        })
+        |> Repo.insert()
+
+      %{status: "active"} ->
+        {:error, :already_active}
+
+      %{status: "pending"} ->
+        {:error, :already_pending}
+    end
+  end
+
+  @doc "Accept a pending partnership invite."
+  def accept_partnership(partnership_id) do
+    case Repo.get(ContractorPartnership, partnership_id) do
+      %{status: "pending"} = partnership ->
+        partnership
+        |> ContractorPartnership.changeset(%{status: "active"})
+        |> Repo.update()
+
+      nil ->
+        {:error, :not_found}
+
+      _ ->
+        {:error, :not_pending}
+    end
+  end
+
+  @doc "Decline a pending partnership invite."
+  def decline_partnership(partnership_id) do
+    case Repo.get(ContractorPartnership, partnership_id) do
+      %{status: "pending"} = partnership ->
+        Repo.delete(partnership)
+
+      nil ->
+        {:error, :not_found}
+
+      _ ->
+        {:error, :not_pending}
+    end
   end
 
   @doc "Create a new contractor org and partnership in one transaction."
@@ -84,6 +184,8 @@ defmodule Fixly.Organizations do
   def create_organization(attrs) do
     %Organization{}
     |> Organization.changeset(attrs)
+    |> Ecto.Changeset.put_change(:display_code, generate_display_code())
+    |> Ecto.Changeset.put_change(:slug, generate_slug(attrs[:name] || attrs["name"] || "org"))
     |> Repo.insert()
   end
 
@@ -93,7 +195,49 @@ defmodule Fixly.Organizations do
     |> Repo.update()
   end
 
+  def update_profile(%Organization{} = org, attrs) do
+    org
+    |> Organization.profile_changeset(attrs)
+    |> Repo.update()
+  end
+
   def delete_organization(%Organization{} = org) do
     Repo.delete(org)
+  end
+
+  # Generate a unique display code like "FX-7K4X"
+  defp generate_display_code do
+    code = "FX-" <> random_code(4)
+
+    if Repo.get_by(Organization, display_code: code) do
+      generate_display_code()
+    else
+      code
+    end
+  end
+
+  defp random_code(length) do
+    chars = ~c"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+    1..length
+    |> Enum.map(fn _ -> Enum.random(chars) end)
+    |> List.to_string()
+  end
+
+  defp generate_slug(name) do
+    base =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+
+    suffix = :crypto.strong_rand_bytes(2) |> Base.encode16(case: :lower)
+    slug = "#{base}-#{suffix}"
+
+    if Repo.get_by(Organization, slug: slug) do
+      generate_slug(name)
+    else
+      slug
+    end
   end
 end

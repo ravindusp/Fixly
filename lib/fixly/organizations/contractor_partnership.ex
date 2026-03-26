@@ -18,7 +18,7 @@ defmodule Fixly.Organizations.ContractorPartnership do
     partnership
     |> cast(attrs, [:owner_org_id, :contractor_org_id, :status])
     |> validate_required([:owner_org_id, :contractor_org_id])
-    |> validate_inclusion(:status, ["active", "inactive"])
+    |> validate_inclusion(:status, ["active", "inactive", "pending"])
     |> unique_constraint([:owner_org_id, :contractor_org_id])
   end
 end
