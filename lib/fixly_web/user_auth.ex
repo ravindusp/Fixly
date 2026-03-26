@@ -37,7 +37,7 @@ defmodule FixlyWeb.UserAuth do
 
     conn
     |> create_or_extend_session(user, params)
-    |> redirect(to: user_return_to || signed_in_path(conn))
+    |> redirect(to: user_return_to || home_path_for_role(user.role))
   end
 
   @doc """
