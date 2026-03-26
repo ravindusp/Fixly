@@ -1307,28 +1307,35 @@ defmodule FixlyWeb.Admin.TicketListLive do
     ticket = Tickets.get_ticket!(ticket_id)
     user = socket.assigns.current_user
 
-    # Handle SLA pause/resume on status change
-    case new_status do
-      "on_hold" -> Tickets.pause_sla(ticket)
-      "in_progress" when ticket.status == "on_hold" -> Tickets.resume_sla(ticket)
-      _ -> :ok
-    end
+    if ticket.status == new_status do
+      {:noreply, socket}
+    else
+      case Tickets.update_ticket_status(ticket, new_status, user) do
+        {:ok, _} ->
+          Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(new_status)}", %{from: ticket.status, to: new_status, changed_by: user.name || user.email})
 
-    {:ok, _} = Tickets.update_ticket(ticket, %{status: new_status})
-    Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(new_status)}", %{from: ticket.status, to: new_status, changed_by: user.name || user.email})
+          updated = Tickets.get_ticket!(ticket.id)
+          PubSubBroadcast.broadcast_ticket_updated(updated)
 
-    updated = Tickets.get_ticket!(ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
+          socket =
+            if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket_id do
+              assign(socket, :selected_ticket, updated)
+            else
+              socket
+            end
 
-    # Refresh selected ticket if it's the one we moved
-    socket =
-      if socket.assigns.selected_ticket && socket.assigns.selected_ticket.id == ticket_id do
-        assign(socket, :selected_ticket, updated)
-      else
-        socket
+          {:noreply, reload_data(socket)}
+
+        {:error, :unauthorized_transition} ->
+          {:noreply, put_flash(socket, :error, "Cannot move ticket from #{status_label(ticket.status)} to #{status_label(new_status)}")}
+
+        {:error, :proof_required} ->
+          {:noreply, put_flash(socket, :error, "Proof of completion required before marking as completed")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to update status")}
       end
-
-    {:noreply, reload_data(socket)}
+    end
   end
 
   def handle_event("set_view_mode", %{"mode" => mode}, socket) do
@@ -1577,21 +1584,26 @@ defmodule FixlyWeb.Admin.TicketListLive do
     ticket = socket.assigns.selected_ticket
     user = socket.assigns.current_user
 
-    case status do
-      "on_hold" -> Tickets.pause_sla(ticket)
-      "in_progress" when ticket.status == "on_hold" -> Tickets.resume_sla(ticket)
-      _ -> :ok
-    end
+    case Tickets.update_ticket_status(ticket, status, user) do
+      {:ok, _} ->
+        Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(status)}", %{
+          from: ticket.status,
+          to: status,
+          changed_by: user.name || user.email
+        })
+        updated = Tickets.get_ticket!(ticket.id)
+        PubSubBroadcast.broadcast_ticket_updated(updated)
+        {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
 
-    {:ok, _} = Tickets.update_ticket(ticket, %{status: status})
-    Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(status)}", %{
-      from: ticket.status,
-      to: status,
-      changed_by: user.name || user.email
-    })
-    updated = Tickets.get_ticket!(ticket.id)
-    PubSubBroadcast.broadcast_ticket_updated(updated)
-    {:noreply, socket |> assign(selected_ticket: updated) |> reload_data()}
+      {:error, :unauthorized_transition} ->
+        {:noreply, put_flash(socket, :error, "Cannot change status from #{status_label(ticket.status)} to #{status_label(status)}")}
+
+      {:error, :proof_required} ->
+        {:noreply, put_flash(socket, :error, "Proof of completion required before marking as completed")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update status")}
+    end
   end
 
   def handle_event("assign_to_org", params, socket) do

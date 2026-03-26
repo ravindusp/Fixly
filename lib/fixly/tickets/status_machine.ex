@@ -7,13 +7,13 @@ defmodule Fixly.Tickets.StatusMachine do
   """
 
   @admin_transitions %{
-    "created" => ["triaged"],
-    "triaged" => ["assigned"],
-    "assigned" => ["in_progress"],
+    "created" => ["triaged", "assigned", "in_progress"],
+    "triaged" => ["assigned", "in_progress"],
+    "assigned" => ["in_progress", "on_hold", "completed"],
     "in_progress" => ["on_hold", "completed"],
-    "on_hold" => ["in_progress"],
+    "on_hold" => ["in_progress", "completed"],
     "completed" => ["reviewed", "in_progress"],
-    "reviewed" => ["closed"],
+    "reviewed" => ["closed", "in_progress"],
     "closed" => []
   }
 

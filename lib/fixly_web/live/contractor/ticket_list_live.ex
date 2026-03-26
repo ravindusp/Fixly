@@ -16,9 +16,13 @@ defmodule FixlyWeb.Contractor.TicketListLive do
       |> assign(:page_title, "Assigned Tickets")
       |> assign(:technicians, technicians)
       |> assign(:org_id, org_id)
+      |> assign(:current_user, user)
+      |> assign(:view_mode, "list")
       |> assign(:selected_ticket, nil)
       |> assign(:cursor, nil)
       |> assign(:has_more, false)
+      |> assign(:grouped, [])
+      |> assign(:kanban_loading, MapSet.new())
       |> reload_data()
 
     {:ok, socket}
@@ -40,96 +44,215 @@ defmodule FixlyWeb.Contractor.TicketListLive do
       <div class="bg-base-100 rounded-xl border border-base-300 shadow-sm">
         <div class="flex items-center justify-between px-5 py-3.5 border-b border-base-300">
           <h2 class="text-sm font-semibold text-base-content">Tickets Assigned to Your Team</h2>
-        </div>
-
-        <!-- Table header -->
-        <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
-          <span>Ticket</span>
-          <span>Location</span>
-          <span>Priority</span>
-          <span>Status</span>
-          <span>Assigned To</span>
-          <span></span>
-        </div>
-
-        <!-- Rows (streamed) -->
-        <div id="contractor-tickets-stream" phx-update="stream">
-          <div
-            :for={{dom_id, ticket} <- @streams.tickets}
-            id={dom_id}
-            class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 transition-colors"
-          >
-            <div class="min-w-0">
-              <p class="text-sm font-medium text-base-content truncate">{truncate(ticket.description, 55)}</p>
-              <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
-            </div>
-
-            <div class="min-w-0">
-              <p :if={ticket.location} class="text-sm text-base-content/70 truncate">{ticket.location.name}</p>
-              <p :if={!ticket.location} class="text-sm text-base-content/30">—</p>
-            </div>
-
-            <div>
-              <.priority_badge priority={ticket.priority} />
-            </div>
-
-            <div>
-              <.status_badge status={ticket.status} />
-            </div>
-
-            <div>
-              <%= if ticket.assigned_to_user do %>
-                <span class="text-sm text-base-content/70">{ticket.assigned_to_user.name || ticket.assigned_to_user.email}</span>
-              <% else %>
-                <div class="dropdown dropdown-end">
-                  <div tabindex="0" role="button" class="btn btn-xs btn-outline btn-primary">Assign</div>
-                  <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-48 p-2 shadow-lg border border-base-300">
-                    <li :for={tech <- @technicians}>
-                      <a phx-click="assign_technician" phx-value-ticket-id={ticket.id} phx-value-user-id={tech.id}>
-                        {tech.name || tech.email}
-                      </a>
-                    </li>
-                    <li :if={@technicians == []}>
-                      <span class="text-base-content/50">No technicians available</span>
-                    </li>
-                  </ul>
-                </div>
-              <% end %>
-            </div>
-
-            <div class="text-right">
-              <.link navigate={~p"/contractor/tickets/#{ticket.id}"} class="btn btn-xs btn-ghost">
-                View
-              </.link>
-            </div>
+          <div class="flex items-center gap-1 bg-base-200 rounded-lg p-0.5">
+            <button
+              phx-click="set_view_mode"
+              phx-value-mode="list"
+              class={["btn btn-xs gap-1.5", @view_mode == "list" && "btn-active", @view_mode != "list" && "btn-ghost"]}
+            >
+              <.icon name="hero-list-bullet" class="size-3.5" />
+              List
+            </button>
+            <button
+              phx-click="set_view_mode"
+              phx-value-mode="kanban"
+              class={["btn btn-xs gap-1.5", @view_mode == "kanban" && "btn-active", @view_mode != "kanban" && "btn-ghost"]}
+            >
+              <.icon name="hero-view-columns" class="size-3.5" />
+              Kanban
+            </button>
           </div>
         </div>
 
+        <!-- List view -->
+        <div :if={@view_mode == "list"}>
+          <!-- Table header -->
+          <div class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-2 border-b border-base-300 text-xs font-medium text-base-content/50 uppercase tracking-wider">
+            <span>Ticket</span>
+            <span>Location</span>
+            <span>Priority</span>
+            <span>Status</span>
+            <span>Assigned To</span>
+            <span></span>
+          </div>
+
+          <!-- Rows (streamed) -->
+          <div id="contractor-tickets-stream" phx-update="stream">
+            <div
+              :for={{dom_id, ticket} <- @streams.tickets}
+              id={dom_id}
+              class="grid grid-cols-[2.5fr_1.5fr_1fr_1fr_1.5fr_1fr] gap-4 px-5 py-3.5 border-b border-base-200 items-center hover:bg-base-200/30 transition-colors"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-base-content truncate">{truncate(ticket.description, 55)}</p>
+                <p class="text-xs text-base-content/50 mt-0.5">{ticket.reference_number}</p>
+              </div>
+
+              <div class="min-w-0">
+                <p :if={ticket.location} class="text-sm text-base-content/70 truncate">{ticket.location.name}</p>
+                <p :if={!ticket.location} class="text-sm text-base-content/30">—</p>
+              </div>
+
+              <div>
+                <.priority_badge priority={ticket.priority} />
+              </div>
+
+              <div>
+                <.status_badge status={ticket.status} />
+              </div>
+
+              <div>
+                <%= if ticket.assigned_to_user do %>
+                  <span class="text-sm text-base-content/70">{ticket.assigned_to_user.name || ticket.assigned_to_user.email}</span>
+                <% else %>
+                  <div class="dropdown dropdown-end">
+                    <div tabindex="0" role="button" class="btn btn-xs btn-outline btn-primary">Assign</div>
+                    <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-10 w-48 p-2 shadow-lg border border-base-300">
+                      <li :for={tech <- @technicians}>
+                        <a phx-click="assign_technician" phx-value-ticket-id={ticket.id} phx-value-user-id={tech.id}>
+                          {tech.name || tech.email}
+                        </a>
+                      </li>
+                      <li :if={@technicians == []}>
+                        <span class="text-base-content/50">No technicians available</span>
+                      </li>
+                    </ul>
+                  </div>
+                <% end %>
+              </div>
+
+              <div class="text-right">
+                <.link navigate={~p"/contractor/tickets/#{ticket.id}"} class="btn btn-xs btn-ghost">
+                  View
+                </.link>
+              </div>
+            </div>
+          </div>
+
+          <!-- Infinite scroll sentinel -->
+          <div
+            :if={@has_more}
+            id="contractor-tickets-scroll"
+            phx-hook="InfiniteScroll"
+            data-has-more={to_string(@has_more)}
+            class="flex justify-center py-4"
+          >
+            <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+          </div>
+        </div>
+
+        <!-- Kanban view -->
+        <div :if={@view_mode == "kanban"} class="p-5">
+          <.kanban_board grouped={@grouped} kanban_loading={@kanban_loading} />
+        </div>
+
         <!-- Empty state -->
-        <div :if={@counts.total == 0} class="flex flex-col items-center justify-center py-16 text-center">
+        <div :if={@counts.total == 0 && @view_mode == "list"} class="flex flex-col items-center justify-center py-16 text-center">
           <div class="w-14 h-14 rounded-2xl bg-base-200 flex items-center justify-center mb-4">
             <.icon name="hero-inbox" class="size-6 text-base-content/30" />
           </div>
           <h3 class="text-base font-semibold text-base-content mb-1">No tickets assigned yet</h3>
-          <p class="text-sm text-base-content/50">Tickets will appear here when the school admin assigns work to your team.</p>
-        </div>
-
-        <!-- Infinite scroll sentinel -->
-        <div
-          :if={@has_more}
-          id="contractor-tickets-scroll"
-          phx-hook="InfiniteScroll"
-          data-has-more={to_string(@has_more)}
-          class="flex justify-center py-4"
-        >
-          <span class="loading loading-spinner loading-sm text-base-content/30"></span>
+          <p class="text-sm text-base-content/50">Tickets will appear here when the property manager assigns work to your team.</p>
         </div>
       </div>
     </div>
     """
   end
 
-  # --- Components ---
+  # --- Kanban Components ---
+
+  attr :grouped, :list, required: true
+  attr :kanban_loading, :any, required: true
+
+  defp kanban_board(assigns) do
+    ~H"""
+    <div class="flex gap-4 overflow-x-auto pb-4 items-stretch min-h-[400px]">
+      <.kanban_column
+        :for={{status, group_data} <- @grouped}
+        status={status}
+        tickets={group_data.tickets}
+        total={group_data.total}
+        has_more={group_data.has_more}
+        loading={MapSet.member?(@kanban_loading, status)}
+      />
+    </div>
+    """
+  end
+
+  attr :status, :string, required: true
+  attr :tickets, :list, required: true
+  attr :total, :integer, required: true
+  attr :has_more, :boolean, required: true
+  attr :loading, :boolean, default: false
+
+  defp kanban_column(assigns) do
+    assigns = assign(assigns, :indexed_tickets, Enum.with_index(assigns.tickets, 1))
+
+    ~H"""
+    <div
+      class="flex-shrink-0 w-72 flex flex-col"
+      id={"kanban-col-#{@status}"}
+      phx-hook="KanbanDrop"
+      data-status={@status}
+    >
+      <div class="flex items-center gap-2 mb-3">
+        <div class={["w-2 h-2 rounded-full", status_dot_color(@status)]}></div>
+        <span class="text-sm font-semibold text-base-content">{status_label(@status)}</span>
+        <span class="badge badge-sm badge-ghost">{@total}</span>
+      </div>
+      <div class="space-y-2.5 flex-1 min-h-[200px] max-h-[calc(100vh-16rem)] overflow-y-auto kanban-dropzone rounded-lg transition-colors p-1" id={"kanban-scroll-#{@status}"}>
+        <.kanban_card :for={{ticket, idx} <- @indexed_tickets} ticket={ticket} index={idx} />
+        <div :if={@loading} class="flex justify-center py-3">
+          <span class="loading loading-spinner loading-sm text-primary"></span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :ticket, :map, required: true
+  attr :index, :integer, required: true
+
+  defp kanban_card(assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/contractor/tickets/#{@ticket.id}"}
+      draggable="true"
+      data-ticket-id={@ticket.id}
+      class="block rounded-lg border border-base-300 bg-base-100 p-3.5 shadow-sm cursor-grab active:cursor-grabbing transition-all kanban-card hover:shadow-md"
+    >
+      <div class="flex items-start justify-between gap-2 mb-2">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] font-mono text-base-content/25 w-5 shrink-0">{@index}</span>
+          <div class="flex flex-wrap gap-1.5">
+            <.priority_badge :if={@ticket.priority} priority={@ticket.priority} />
+            <span :if={@ticket.category} class="badge badge-sm badge-ghost">{@ticket.category}</span>
+          </div>
+        </div>
+        <span class="text-xs text-base-content/40 font-mono shrink-0">{@ticket.reference_number}</span>
+      </div>
+      <p class="text-sm font-medium text-base-content leading-snug mb-2">{truncate(@ticket.description, 80)}</p>
+      <div :if={@ticket.location} class="flex items-center gap-1 text-xs text-base-content/50 mb-3">
+        <.icon name="hero-map-pin" class="size-3" />
+        <span class="truncate">{@ticket.location.name}</span>
+      </div>
+      <div class="flex items-center justify-between">
+        <div :if={@ticket.assigned_to_user} class="flex items-center gap-1.5">
+          <div class="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+            <span class="text-[9px] font-semibold text-primary">
+              {String.first(@ticket.assigned_to_user.name || @ticket.assigned_to_user.email) |> String.upcase()}
+            </span>
+          </div>
+          <span class="text-xs text-base-content/50">{@ticket.assigned_to_user.name || @ticket.assigned_to_user.email}</span>
+        </div>
+        <span :if={!@ticket.assigned_to_user} class="text-[10px] text-base-content/30">Unassigned</span>
+        <span class="text-xs text-base-content/40">{format_date(@ticket.inserted_at)}</span>
+      </div>
+    </.link>
+    """
+  end
+
+  # --- Shared Components ---
 
   attr :label, :string, required: true
   attr :value, :integer, required: true
@@ -201,6 +324,10 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   # --- Events ---
 
   @impl true
+  def handle_event("set_view_mode", %{"mode" => mode}, socket) do
+    {:noreply, socket |> assign(:view_mode, mode) |> reload_data()}
+  end
+
   def handle_event("load_more", _, socket) do
     if socket.assigns.has_more && socket.assigns.cursor do
       page = Tickets.list_contractor_tickets_paginated(socket.assigns.org_id, socket.assigns.cursor)
@@ -212,6 +339,30 @@ defmodule FixlyWeb.Contractor.TicketListLive do
        |> stream(:tickets, page.entries)}
     else
       {:noreply, socket}
+    end
+  end
+
+  def handle_event("kanban_drop", %{"ticket_id" => ticket_id, "new_status" => new_status}, socket) do
+    ticket = Tickets.get_ticket!(ticket_id)
+    user = socket.assigns.current_user
+
+    if ticket.status == new_status do
+      {:noreply, socket}
+    else
+      case Tickets.update_ticket_status(ticket, new_status, user) do
+        {:ok, _} ->
+          Tickets.log_ticket_event(ticket.id, "status_change", "Status changed from #{status_label(ticket.status)} to #{status_label(new_status)}", %{from: ticket.status, to: new_status, changed_by: user.name || user.email})
+          {:noreply, reload_data(socket)}
+
+        {:error, :unauthorized_transition} ->
+          {:noreply, put_flash(socket, :error, "Cannot move ticket from #{status_label(ticket.status)} to #{status_label(new_status)}")}
+
+        {:error, :proof_required} ->
+          {:noreply, put_flash(socket, :error, "Proof of completion required before marking as completed")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to update status")}
+      end
     end
   end
 
@@ -249,16 +400,32 @@ defmodule FixlyWeb.Contractor.TicketListLive do
         completed: Map.get(status_counts, "completed", 0) + Map.get(status_counts, "reviewed", 0) + Map.get(status_counts, "closed", 0)
       }
 
-      page = Tickets.list_contractor_tickets_paginated(org_id)
+      # Always load kanban grouped data
+      grouped = Tickets.list_contractor_tickets_by_status(org_id, 20)
+      socket = assign(socket, :counts, counts) |> assign(:grouped, grouped)
+
+      case socket.assigns.view_mode do
+        "kanban" ->
+          socket
+          |> stream(:tickets, [], reset: true)
+          |> assign(:cursor, nil)
+          |> assign(:has_more, false)
+
+        _ ->
+          page = Tickets.list_contractor_tickets_paginated(org_id)
+          socket
+          |> assign(:cursor, page.cursor)
+          |> assign(:has_more, page.has_more)
+          |> stream(:tickets, page.entries, reset: true)
+      end
+    else
+      empty_grouped =
+        ~w(assigned in_progress on_hold completed)
+        |> Enum.map(fn s -> {s, %{tickets: [], total: 0, has_more: false}} end)
 
       socket
-      |> assign(:counts, counts)
-      |> assign(:cursor, page.cursor)
-      |> assign(:has_more, page.has_more)
-      |> stream(:tickets, page.entries, reset: true)
-    else
-      socket
       |> assign(:counts, %{total: 0, open: 0, in_progress: 0, on_hold: 0, completed: 0})
+      |> assign(:grouped, empty_grouped)
       |> assign(:cursor, nil)
       |> assign(:has_more, false)
       |> stream(:tickets, [], reset: true)
@@ -274,6 +441,16 @@ defmodule FixlyWeb.Contractor.TicketListLive do
   defp status_label("reviewed"), do: "Reviewed"
   defp status_label("closed"), do: "Closed"
   defp status_label(other), do: String.capitalize(other)
+
+  defp status_dot_color("assigned"), do: "bg-primary"
+  defp status_dot_color("in_progress"), do: "bg-info"
+  defp status_dot_color("on_hold"), do: "bg-warning"
+  defp status_dot_color("completed"), do: "bg-success"
+  defp status_dot_color(_), do: "bg-gray-400"
+
+  defp format_date(datetime) do
+    Calendar.strftime(datetime, "%b %d")
+  end
 
   defp truncate(nil, _), do: ""
   defp truncate(string, max) when byte_size(string) <= max, do: string

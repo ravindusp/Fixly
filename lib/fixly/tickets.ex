@@ -126,6 +126,25 @@ defmodule Fixly.Tickets do
     |> Fixly.Pagination.paginate_desc(cursor: cursor)
   end
 
+  @doc "List contractor tickets grouped by status for kanban."
+  def list_contractor_tickets_by_status(contractor_org_id, per_status_limit \\ 20) do
+    statuses = ~w(assigned in_progress on_hold completed)
+    total_counts = count_contractor_tickets_by_status(contractor_org_id)
+
+    Enum.map(statuses, fn status ->
+      tickets =
+        Ticket
+        |> where([t], t.assigned_to_org_id == ^contractor_org_id and t.status == ^status)
+        |> order_by([t], desc: t.inserted_at)
+        |> limit(^per_status_limit)
+        |> preload([:location, :assigned_to_user])
+        |> Repo.all()
+
+      total = Map.get(total_counts, status, 0)
+      {status, %{tickets: tickets, total: total, has_more: total > per_status_limit}}
+    end)
+  end
+
   @doc "Count contractor tickets by status."
   def count_contractor_tickets_by_status(contractor_org_id) do
     Ticket
