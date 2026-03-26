@@ -321,7 +321,7 @@ defmodule FixlyWeb.Contractor.TicketDetailLive do
       ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
         lat = ticket.location.metadata["gps_lat"]
         lng = ticket.location.metadata["gps_lng"]
-        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+        "https://www.google.com/maps/search/?api=1&query=#{lat},#{lng}"
 
       ticket.location ->
         "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"

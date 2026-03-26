@@ -381,7 +381,7 @@ defmodule FixlyWeb.Admin.AssetDetailLive do
       location.metadata["gps_lat"] && location.metadata["gps_lng"] ->
         lat = location.metadata["gps_lat"]
         lng = location.metadata["gps_lng"]
-        "https://www.google.com/maps/dir/?api=1&destination=#{lat},#{lng}"
+        "https://www.google.com/maps/search/?api=1&query=#{lat},#{lng}"
 
       true ->
         "https://www.google.com/maps/search/?api=1&query=#{URI.encode(location.name)}"

@@ -586,7 +586,7 @@ defmodule FixlyWeb.Technician.MyTicketsLive do
   defp maps_url(ticket) do
     cond do
       ticket.location && ticket.location.metadata["gps_lat"] && ticket.location.metadata["gps_lng"] ->
-        "https://www.google.com/maps/dir/?api=1&destination=#{ticket.location.metadata["gps_lat"]},#{ticket.location.metadata["gps_lng"]}"
+        "https://www.google.com/maps/search/?api=1&query=#{ticket.location.metadata["gps_lat"]},#{ticket.location.metadata["gps_lng"]}"
       ticket.location ->
         "https://www.google.com/maps/search/?api=1&query=#{URI.encode(ticket.location.name)}"
       true ->
